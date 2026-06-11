@@ -93,8 +93,22 @@ Code/User/chatLanguageModels.json
 Code/Cookies
 Code/Cookies-journal
 
-# DConf (binary config)
-dconf/user
+# Machine-specific / auto-generated state — never public
+cachyos-hello.json
+pavucontrol.ini
+user-dirs.locale
+user-dirs.dirs
+
+# Backup files
+**/*.bak
+
+# VS Code internal state
+Code/Partitions/
+Code/User/profiles/
+Code/User/agent-sessions.code-workspace
+
+# Wallpapers and large binaries
+background
 
 # Session data
 session/
