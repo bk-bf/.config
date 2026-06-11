@@ -1,0 +1,79 @@
+/* Wofi styling to match waybar GNOME-like theme */
+
+* {
+    font-family: "MesloLGL Nerd Font", "Cantarell", "Ubuntu", sans-serif;
+    font-size: 11pt;
+    font-weight: 500;
+}
+
+window {
+    margin: 0px;
+    border: none;
+    background-color: rgba(0, 0, 0, 0.9);
+    border-radius: 12px;
+}
+
+#input {
+    margin: 10px;
+    padding: 10px 15px;
+    border: none;
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+#input:focus {
+    background-color: rgba(255, 255, 255, 0.15);
+    outline: none;
+}
+
+#inner-box {
+    margin: 5px;
+    padding: 5px;
+    border: none;
+    background-color: transparent;
+}
+
+#outer-box {
+    margin: 0px;
+    padding: 0px;
+    border: none;
+    background-color: transparent;
+}
+
+#scroll {
+    margin: 0px;
+    padding: 5px;
+    border: none;
+    background-color: transparent;
+}
+
+#text {
+    margin: 0px;
+    padding: 0px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+#entry {
+    padding: 8px 12px;
+    margin: 2px 5px;
+    border: none;
+    background-color: transparent;
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+
+#entry:selected {
+    background-color: rgba(255, 255, 255, 0.2);
+    outline: none;
+}
+
+#entry:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+#entry:selected #text {
+    color: #ffffff;
+    font-weight: 600;
+}

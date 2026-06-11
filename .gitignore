@@ -1,0 +1,165 @@
+# Cache directories
+**/Cache/
+**/CachedData/
+**/CachedExtensions/
+**/CachedExtensionVSIXs/
+**/CachedConfigurations/
+**/CachedProfilesData/
+**/Code Cache/
+**/GPUCache/
+**/DawnGraphiteCache/
+**/DawnWebGPUCache/
+**/component_crx_cache/
+
+# Storage and databases
+**/Local Storage/
+**/Session Storage/
+**/WebStorage/
+**/IndexedDB/
+**/databases/
+**/blob_storage/
+**/Service Worker/
+**/Shared Dictionary/
+**/shared_proto_db/
+
+# Cookies and session data
+Cookies
+Cookies-journal
+**/Cookies
+**/Cookies-journal
+
+# Network and security
+Network Persistent State
+TransportSecurity
+**/Network Persistent State
+**/TransportSecurity
+Trust Tokens*
+**/Trust Tokens*
+DIPS
+DIPS-wal
+**/DIPS
+**/DIPS-wal
+
+# Shared storage
+SharedStorage
+SharedStorage-wal
+**/SharedStorage
+**/SharedStorage-wal
+
+# Lock and socket files
+SingletonLock
+SingletonSocket
+SingletonCookie
+**/SingletonLock
+**/SingletonSocket
+**/SingletonCookie
+**/*.lock
+**/*.socket
+.org.chromium.Chromium.*
+**/.org.chromium.Chromium.*
+
+# Logs
+**/logs/
+**/*.log
+**/sentry/
+battery-report-*.log
+
+# Crash reports
+**/Crashpad/
+**/crash-reports/
+
+# Video and media stats
+**/VideoDecodeStats/
+**/Dictionaries/
+
+# Machine-specific files
+machineid
+**/machineid
+
+# Backups
+**/Backups/
+**/backup/
+**/*.backup
+**/*~
+
+# VS Code specific
+Code/Preferences
+Code/languagepacks.json
+Code/User/globalStorage/
+Code/User/workspaceStorage/
+Code/User/History/
+Code/User/sync/
+Code/User/chatLanguageModels.json
+Code/Cookies
+Code/Cookies-journal
+
+# DConf (binary config)
+dconf/user
+
+# Session data
+session/
+
+# Pulse/Pipewire (machine-specific audio)
+pulse/
+pipewire/pipewire.conf.d/
+wireplumber/
+
+# Qt cache
+qt5ct/qss/
+qt6ct/qss/
+
+# GTK recent files and bookmarks (can be large)
+gtk-3.0/bookmarks
+gtk-4.0/bookmarks
+
+# Trash
+trashrc
+
+# KDE/Qt boilerplate — auto-generated, never intentionally configured
+plasmashellrc
+QtProject.conf
+Trolltech.conf
+baloofilerc
+kcminputrc
+arkrc
+
+# Nautilus (GNOME Files)
+nautilus/search-metadata
+
+# Environment (machine-specific)
+environment.d/
+
+# Various app caches and temp files
+*.tmp
+*.temp
+**/.DS_Store
+**/Thumbs.db
+
+# MPV watch history
+mpv/watch_later/
+
+# Fish shell history
+fish/fish_variables
+
+# Monitor configuration (machine-specific)
+monitors.xml
+
+# Forge stylesheet (generated)
+forge/stylesheet/
+
+# Builder
+gnome-builder/projects/
+
+# Autostart (might contain user-specific apps)
+# autostart/
+
+# IBus (input method cache)
+ibus/bus/
+
+# Temporary state files
+/tmp/
+*.pid
+/battery_monitor_state
+
+# GNOME runtime files
+.gsd-keyboard.settings-ported

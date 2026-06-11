@@ -1,0 +1,112 @@
+/* GTK3 — pure black overrides to match Waybar/Mako/SwayOSD theme */
+
+/* Windows, dialogs, popovers */
+window,
+dialog,
+.background {
+  background-color: #000000;
+  color: #ffffff;
+}
+
+/* Menus (nm-applet, blueman right-click) */
+menu,
+menubar,
+.menu,
+.context-menu {
+  background-color: #000000;
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  border: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.8);
+}
+
+menuitem,
+.menuitem {
+  background-color: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+}
+
+menuitem:hover,
+.menuitem:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+menuitem:disabled,
+.menuitem:disabled {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+separator,
+.separator {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Popovers (nm-applet connection picker etc.) */
+popover,
+.popover {
+  background-color: #000000;
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  border: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.8);
+}
+
+/* Tooltips */
+tooltip,
+.tooltip {
+  background-color: #000000;
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+  border: none;
+}
+
+tooltip label {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Buttons */
+button {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  border-radius: 8px;
+  border: none;
+}
+
+button:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+button:active {
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+/* Scrollbars */
+scrollbar slider {
+  background-color: rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  min-width: 6px;
+  min-height: 6px;
+}
+
+scrollbar slider:hover {
+  background-color: rgba(255, 255, 255, 0.5);
+}
+
+/* Labels */
+label {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Entry (text inputs) */
+entry {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+entry:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}

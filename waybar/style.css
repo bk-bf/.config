@@ -1,0 +1,11 @@
+/*
+ * Waybar theme entry point.
+
+ *
+ * Available themes:
+ *   style-bubbles.css  → transparent background, modules rendered as rounded pills
+ *   style-bar.css      → solid black background spanning the full bar width
+ */
+
+/* @import "style-bar.css"; */
+@import "style-bubbles.css";

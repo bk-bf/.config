@@ -1,0 +1,100 @@
+/* Full-bar bubble mode — one large rounded pill spanning the full width */
+
+* {
+    font-family: "MesloLGL Nerd Font", "Font Awesome 7 Free", "Cantarell", "Ubuntu", sans-serif;
+    font-size: 11pt;
+    min-height: 0;
+    font-weight: 500;
+}
+
+window#waybar {
+    background-color: transparent; /* pill bg comes from window#waybar>box below */
+    color: #ffffff;
+}
+
+/* The single pill — border-radius on the outer box wraps everything */
+window#waybar > box {
+    background-color: rgba(0, 0, 0, 1.0);
+    border-radius: 12px;
+    margin: 1px 8px 2px 8px; /* matches bubbles mode top/bottom to keep same bar height */
+}
+
+/* Groups are transparent — the box above provides the background */
+#nav,
+#perf,
+#controls {
+    background-color: transparent;
+    padding: 0 4px;
+}
+
+#workspaces {
+    background-color: transparent;
+    padding: 0;
+}
+
+#workspaces button {
+    padding: 0 8px;
+    background-color: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    border: none;
+    margin: 2px 2px;
+    transition: all 0.2s;
+}
+
+#workspaces button.focused {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+}
+
+#workspaces button:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+#workspaces button.urgent {
+    background-color: rgba(192, 28, 40, 0.8);
+    color: #ffffff;
+}
+
+#window {
+    color: rgba(255, 255, 255, 0.9);
+    padding: 2px 15px;
+    font-weight: 600;
+}
+
+#clock {
+    padding: 2px 8px;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+/* All inner modules — transparent bg, uniform padding */
+#cpu,
+#temperature,
+#memory,
+#backlight,
+#pulseaudio,
+#battery,
+#tray {
+    padding: 2px 8px;
+    color: rgba(255, 255, 255, 0.9);
+    border: none;
+    background-color: transparent;
+}
+
+#tray {
+    padding: 2px 8px;
+}
+
+/* Critical temp highlight — threshold set in config.jsonc */
+#temperature.critical {
+    color: #e01b24;
+}
+
+#tray>.passive {
+    opacity: 0.7;
+}
+
+#tray>.needs-attention {
+    background-color: rgba(53, 132, 228, 0.3);
+}

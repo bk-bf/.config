@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=librepods
+Exec=/usr/bin/librepods --hide
+Icon=librepods
+Comment=librepods autostart
+X-GNOME-Autostart-enabled=true
+Terminal=false

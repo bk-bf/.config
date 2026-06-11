@@ -1,0 +1,12 @@
+[Unit]
+Description=Powerstat Continuous Logger
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/home/kirill/.local/bin/powerstat-logger.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

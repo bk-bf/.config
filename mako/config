@@ -1,0 +1,52 @@
+# Mako notification daemon configuration
+# Styled to match Waybar's GNOME-like bubble layout
+
+# Layout
+width=350
+height=150
+padding=15
+margin=8
+border-radius=12
+
+# Colors (matching Waybar: black background, white text)
+background-color=#000000
+text-color=#FFFFFF
+border-color=#000000
+progress-color=over #FFFFFF33
+
+# Font (matching Waybar)
+font=MesloLGL Nerd Font 11
+
+# Styling
+border-size=0
+default-timeout=5000
+ignore-timeout=0
+
+# Positioning
+anchor=top-right
+layer=overlay
+
+# Grouping
+group-by=app-name
+max-visible=5
+
+# Icons
+icons=1
+max-icon-size=48
+icon-path=/usr/share/icons/hicolor
+
+# Urgency-specific overrides
+[urgency=low]
+background-color=#000000E6
+text-color=#FFFFFFB3
+
+[urgency=normal]
+background-color=#000000
+text-color=#FFFFFF
+
+[urgency=critical]
+background-color=#C01C28
+text-color=#FFFFFF
+border-color=#C01C28
+border-size=2
+default-timeout=0

@@ -1,0 +1,96 @@
+{
+    // Bar position & sizing
+    "layer"          : "top",       // "top" renders above windows; use "overlay" to float above fullscreen
+    "position"       : "top",
+    "height"         : 24,          // fixed height in px; remove to auto-fit content
+    "spacing"        : 0,           // gap between modules in px
+
+    // Layout — modules grouped into bubbles via group/* wrappers
+    // To add a module: add it to the group's "modules" array, then define its config below
+    // To switch visual mode: change @import in style.css 
+    "modules-left"   : ["group/nav"],
+    "modules-center" : ["group/perf"],
+    "modules-right"  : ["group/controls"],
+
+    // Groups — each renders as a single bubble in bubbles mode
+    "group/nav"      : { "orientation": "horizontal", "modules": ["sway/workspaces", "clock"] },
+    "group/perf"     : { "orientation": "horizontal", "modules": ["cpu", "temperature", "memory"] },
+    "group/controls" : { "orientation": "horizontal", "modules": ["backlight", "pulseaudio", "battery", "tray"] },
+
+    // Workspaces — shows sway workspace buttons
+    "sway/workspaces": {"disable-scroll": false, "all-outputs": true, "format": "{name}"},
+    "sway/window"    : {"format": "  {}", "max-length": 50},
+
+    // Unused spacer — available if needed for padding between modules
+    "custom/spacer"  : {"format": " ", "tooltip": false},
+
+    // Clock — updates every second; tooltip shows calendar
+    "clock"          : {
+        "interval"      : 1,
+        "format"        : "{:%a %b %d  %H:%M}",
+        "tooltip-format": "<big>{:%Y %B}</big>\n<tt><small>{calendar}</small></tt>",
+        "tooltip"       : true
+    },
+
+    // CPU — usage % + avg frequency in tooltip; interval in seconds
+    "cpu"            : {"interval": 5, "format": "󰻠 {usage}%", "tooltip-format": "CPU: {usage}%  {avg_frequency}GHz"},
+
+    // Temperature — add "hwmon-path" if it reads the wrong sensor
+    // e.g. "hwmon-path": "/sys/class/hwmon/hwmon2/temp1_input"
+    "temperature"    : {
+        "interval"          : 5,
+        "format"            : "󰔏 {temperatureC}°C",
+        "critical-threshold": 100,  // turns red above this °C
+        "format-critical"   : "󰸁 {temperatureC}°C",
+        "tooltip-format"    : "CPU Temp: {temperatureC}°C"
+    },
+
+    // Memory — percentage of RAM used; tooltip shows GiB values
+    "memory"         : {
+        "interval"      : 5,
+        "format"        : "󰍛 {percentage}%",
+        "tooltip-format": "RAM: {used:0.1f}GiB / {total:0.1f}GiB"
+    },
+
+    // Backlight — scroll to adjust brightness; needs backlight udev rules for non-root
+    "backlight"      : {
+        "format"        : "{icon} {percent}%",
+        "format-icons"  : ["󰃞", "󰃟", "󰃠"],
+        "scroll-step"   : 5,        // % per scroll tick
+        "tooltip-format": "Brightness: {percent}%"
+    },
+
+    // PulseAudio — click opens pavucontrol; scroll adjusts volume
+    // format-icons order: low/mid/high for default sink
+    "pulseaudio"     : {
+        "format"        : "{icon} {volume}%",
+        "format-muted"  : "󰝟 {volume}%",
+        "format-icons"  : {
+            "headphone" : "󰋋",
+            "hands-free": "󰋎",
+            "headset"   : "󰋎",
+            "phone"     : "󰄜",
+            "portable"  : "󰄜",
+            "car"       : "󰄜",
+            "default"   : ["󰕿", "󰖀", "󰕾"]
+        },
+        "on-click"      : "pavucontrol",
+        "scroll-step"   : 5,
+        "tooltip-format": "{volume}% on {desc}"
+    },
+
+    // Battery — warning at 30%, critical at 15%; format-icons maps 0–100% in 10 steps
+    "battery"        : {
+        "interval"       : 10,
+        "states"         : {"warning": 30, "critical": 15},
+        "format"         : "{icon} {capacity}%",
+        "format-charging": "󰂄 {capacity}%",
+        "format-plugged" : "󰚥 {capacity}%",
+        "format-full"    : "󰁹 {capacity}%",
+        "format-icons"   : ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"],
+        "tooltip-format" : "{timeTo}, {power}W"
+    },
+
+    // Tray — system tray icons; icon-size in px, spacing between icons in px
+    "tray"           : {"icon-size": 20, "spacing": 10}
+}

@@ -1,0 +1,295 @@
+################################################################################
+#                              SWAY CONFIGURATION                              #
+################################################################################
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                            CORE VARIABLES                                 ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+set $mod Mod4
+set $term kitty
+set $menu wofi --show drun
+
+# Vim-style direction keys
+set $left h
+set $down j
+set $up k
+set $right l
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                         APPEARANCE & LAYOUT                               ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# Wallpaper
+output * bg $HOME/Pictures/wallpaper.png fill
+
+# Window appearance
+default_border pixel 0
+default_floating_border pixel 0
+for_window [app_id=".*"] border pixel 0
+for_window [class=".*"] border pixel 0
+
+# Gaps
+gaps inner 5
+gaps outer 0
+smart_gaps off
+
+# Warp cursor to focused window on keyboard focus change
+mouse_warping container
+
+# Hide cursor after 5 seconds of inactivity
+seat * hide_cursor 3000
+
+# SwayFX effects
+corner_radius 10
+smart_corner_radius on
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                         ESSENTIAL KEYBINDINGS                             ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# Terminal & Application Launcher
+bindsym $mod+Return exec $term
+bindsym Ctrl+Return exec $term
+bindsym $mod+d exec $menu
+
+# Window Management
+bindsym $mod+q kill
+bindsym $mod+f fullscreen
+bindsym $mod+Shift+space floating toggle
+bindsym $mod+space focus mode_toggle
+
+# Frequently Used Apps
+bindsym $mod+n exec nautilus
+bindsym $mod+i exec env XDG_CURRENT_DESKTOP=GNOME gnome-control-center
+bindsym $mod+Shift+b exec blueman-manager
+bindsym $mod+c exec cliphist list | wofi --dmenu --prompt 'Clipboard' | cliphist decode | wl-copy
+
+# Screenshots (saved to ~/Downloads)
+bindsym Print exec grim -g "$(slurp)" ~/Downloads/screenshot-$(date +%Y%m%d-%H%M%S).png && notify-send "Screenshot" "Area screenshot saved"
+bindsym Shift+Print exec grim ~/Downloads/screenshot-$(date +%Y%m%d-%H%M%S).png && notify-send "Screenshot" "Fullscreen screenshot saved"
+bindsym Ctrl+Print exec grim -g "$(swaymsg -t get_tree | jq -r '.. | select(.focused?) | .rect | "\(.x),\(.y) \(.width)x\(.height)"')" ~/Downloads/screenshot-$(date +%Y%m%d-%H%M%S).png && notify-send "Screenshot" "Window screenshot saved"
+
+# System Controls
+bindsym $mod+Shift+r reload
+bindsym $mod+Shift+e exec swaynag -t warning -m 'You pressed the exit shortcut. Do you really want to exit sway? This will end your Wayland session.' -B 'Yes, exit sway' 'swaymsg exit'
+
+# Lid switch - GDM greeter only (no swaylock - causes glitches)
+bindswitch --reload --locked lid:on exec 'gdbus call --system --dest org.gnome.DisplayManager --object-path /org/gnome/DisplayManager/LocalDisplayFactory --method org.gnome.DisplayManager.LocalDisplayFactory.CreateTransientDisplay > /dev/null'
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                        WORKSPACE MANAGEMENT                               ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# Switch workspace
+bindsym $mod+1 workspace number 1
+bindsym $mod+2 workspace number 2
+bindsym $mod+3 workspace number 3
+bindsym $mod+4 workspace number 4
+bindsym $mod+5 workspace number 5
+bindsym $mod+6 workspace number 6
+bindsym $mod+7 workspace number 7
+bindsym $mod+8 workspace number 8
+bindsym $mod+9 workspace number 9
+bindsym $mod+0 workspace number 10
+
+# Move container to workspace
+bindsym $mod+Shift+1 move container to workspace number 1
+bindsym $mod+Shift+2 move container to workspace number 2
+bindsym $mod+Shift+3 move container to workspace number 3
+bindsym $mod+Shift+4 move container to workspace number 4
+bindsym $mod+Shift+5 move container to workspace number 5
+bindsym $mod+Shift+6 move container to workspace number 6
+bindsym $mod+Shift+7 move container to workspace number 7
+bindsym $mod+Shift+8 move container to workspace number 8
+bindsym $mod+Shift+9 move container to workspace number 9
+bindsym $mod+Shift+0 move container to workspace number 10
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                       WINDOW NAVIGATION & FOCUS                           ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# Move focus (vim keys)
+bindsym $mod+$left focus left
+bindsym $mod+$down focus down
+bindsym $mod+$up focus up
+bindsym $mod+$right focus right
+
+# Move focus (arrow keys)
+bindsym $mod+Left focus left
+bindsym $mod+Down focus down
+bindsym $mod+Up focus up
+bindsym $mod+Right focus right
+
+# Move window (vim keys)
+bindsym $mod+Shift+$left move left
+bindsym $mod+Shift+$down move down
+bindsym $mod+Shift+$up move up
+bindsym $mod+Shift+$right move right
+
+# Move window (arrow keys)
+bindsym $mod+Shift+Left move left
+bindsym $mod+Shift+Down move down
+bindsym $mod+Shift+Up move up
+bindsym $mod+Shift+Right move right
+
+# Parent container
+bindsym $mod+a focus parent
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                          LAYOUT MANAGEMENT                                ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# Splits
+bindsym $mod+b splith
+bindsym $mod+v splitv
+
+# Container layouts
+bindsym $mod+s layout stacking
+bindsym $mod+w layout tabbed
+bindsym $mod+e layout toggle split
+
+# Gaps adjustment
+bindsym $mod+z gaps inner current plus 1
+bindsym $mod+Shift+z gaps inner current minus 1
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                       SCRATCHPAD & RESIZE MODE                            ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# Scratchpad
+bindsym $mod+Shift+minus move scratchpad
+bindsym $mod+minus scratchpad show
+
+# Resize mode
+mode "resize" {
+    bindsym $left resize shrink width 10px
+    bindsym $down resize grow height 10px
+    bindsym $up resize shrink height 10px
+    bindsym $right resize grow width 10px
+    
+    bindsym Left resize shrink width 10px
+    bindsym Down resize grow height 10px
+    bindsym Up resize shrink height 10px
+    bindsym Right resize grow width 10px
+    
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+bindsym $mod+r mode "resize"
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                         HARDWARE KEYS                                     ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# Volume controls (swayosd shows GNOME-style popup)
+bindsym --locked XF86AudioMute exec swayosd-client --output-volume mute-toggle
+bindsym --locked XF86AudioLowerVolume exec swayosd-client --output-volume lower
+bindsym --locked XF86AudioRaiseVolume exec swayosd-client --output-volume raise
+bindsym --locked XF86AudioMicMute exec swayosd-client --input-volume mute-toggle
+
+# Brightness controls (swayosd shows GNOME-style popup)
+bindsym --locked XF86MonBrightnessDown exec swayosd-client --min-brightness 1 --brightness -2
+bindsym --locked XF86MonBrightnessUp exec swayosd-client --min-brightness 1 --brightness +2
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                          INPUT CONFIGURATION                              ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# Keyboard
+input "type:keyboard" {
+    xkb_layout de
+}
+
+# Touchpad
+input "type:touchpad" {
+    natural_scroll enabled
+    tap enabled
+    dwt enabled
+    drag enabled
+    drag_lock disabled
+}
+
+# Mouse drag modifier
+floating_modifier $mod normal
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                         TOUCHPAD GESTURES                                 ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# 3-finger workspace navigation
+bindgesture swipe:right workspace prev
+bindgesture swipe:left workspace next
+
+# 3-finger window management
+bindgesture swipe:up fullscreen toggle
+bindgesture swipe:down floating toggle
+
+# 4-finger container movement
+bindgesture swipe:4:right move container to workspace prev
+bindgesture swipe:4:left move container to workspace next
+
+# Pinch gestures
+bindgesture pinch:inward+up move up
+bindgesture pinch:inward+down move down
+bindgesture pinch:outward fullscreen toggle
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                        ENVIRONMENT & AUTOSTART                            ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# OSD server for GNOME-style volume/brightness popups (managed by systemd user service)
+exec systemctl --user start swayosd.service
+
+# GNOME integration environment
+exec dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY SWAYSOCK XDG_CURRENT_DESKTOP=GNOME
+exec systemctl --user import-environment DISPLAY WAYLAND_DISPLAY SWAYSOCK XDG_CURRENT_DESKTOP
+
+# GNOME services
+exec /usr/lib/gsd-xsettings
+exec /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+exec gnome-keyring-daemon --start --components=secrets
+
+# System tray applets
+exec --no-startup-id nm-applet --indicator
+exec blueman-applet
+exec --no-startup-id aw-qt
+
+# Clipboard history daemon
+exec wl-paste --watch cliphist store
+
+# Battery monitor for low battery notifications
+exec ~/.config/sway/scripts/battery-monitor.sh
+
+# GDM greeter on suspend (no swaylock needed!)
+exec_always pkill swayidle; swayidle -w before-sleep 'gdbus call --system --dest org.gnome.DisplayManager --object-path /org/gnome/DisplayManager/LocalDisplayFactory --method org.gnome.DisplayManager.LocalDisplayFactory.CreateTransientDisplay > /dev/null' &
+
+# Status bar
+exec_always --no-startup-id killall -q waybar; waybar
+
+# Autotiling (automatic horizontal/vertical split)
+exec_always autotiling
+
+# Startup fix for the waybar, i dont care about doing it any other way since this works and is convenient
+exec 'if [ ! -f /tmp/sway_restarted_$$ ]; then touch /tmp/sway_restarted_$$ && sleep 2 && swaymsg reload; fi'
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                       APPLICATION AUTO-START                              ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# Assign applications to specific workspaces
+assign [app_id="code-url-handler"] workspace number 1
+assign [app_id="firefox"] workspace number 3
+assign [app_id="fladder"] workspace number 6
+
+# Start applications (they'll automatically go to assigned workspaces)
+exec code
+exec firefox
+exec fladder
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                          ADDITIONAL CONFIG                                ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+include /etc/sway/config.d/*
+

@@ -1,0 +1,112 @@
+/* Bubbles mode — each group renders as a floating rounded pill */
+
+* {
+    font-family: "MesloLGL Nerd Font", "Font Awesome 7 Free", "Cantarell", "Ubuntu", sans-serif;
+    font-size: 11pt;
+    min-height: 0;
+    font-weight: 500;
+}
+
+window#waybar {
+    background-color: transparent; /* bar itself is invisible; bubbles provide the bg */
+    color: #ffffff;
+}
+
+/* Group bubbles — border-radius here is all that's needed, no per-module capping */
+#nav,
+#perf,
+#controls {
+    background-color: rgba(0, 0, 0, 1.0);
+    border-radius: 12px;
+    margin: 1px 4px 2px 4px; /* top/bottom keep bar height consistent with bar mode */
+    padding: 0 4px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* Edge margins — extra gap so bubbles don't hug the screen edges */
+#nav {
+    margin-left: 8px;
+}
+
+#controls {
+    margin-right: 8px;
+}
+
+/* Workspace buttons inside nav group */
+#workspaces {
+    background-color: transparent;
+    padding: 0;
+}
+
+#workspaces button {
+    padding: 0 8px;
+    background-color: transparent;
+    color: rgba(255, 255, 255, 0.7);
+    border: none;
+    border-radius: 8px;
+    margin: 2px 2px;
+    transition: all 0.2s;
+}
+
+#workspaces button.focused {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
+
+#workspaces button:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+}
+
+#workspaces button.urgent {
+    background-color: rgba(192, 28, 40, 0.8);
+    color: #ffffff;
+}
+
+/* Standalone modules (not inside a group) get their own bubble */
+#window {
+    background-color: rgba(0, 0, 0, 1.0);
+    border-radius: 12px;
+    color: rgba(255, 255, 255, 0.9);
+    padding: 2px 15px;
+    margin: 1px 4px 2px 4px;
+    font-weight: 600;
+}
+
+/* Inner modules — no border-radius needed, the group handles the pill shape */
+#clock {
+    padding: 2px 8px;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+#tray {
+    padding: 2px 6px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+#cpu,
+#temperature,
+#memory,
+#backlight,
+#pulseaudio,
+#battery {
+    padding: 2px 6px;
+    color: rgba(255, 255, 255, 0.9);
+    border: none;
+    background-color: transparent;
+}
+
+/* Critical temp highlight — threshold set in config.jsonc */
+#temperature.critical {
+    color: #e01b24;
+}
+
+#tray>.passive {
+    opacity: 0.7;
+}
+
+#tray>.needs-attention {
+    background-color: rgba(53, 132, 228, 0.3);
+    border-radius: 4px;
+}
