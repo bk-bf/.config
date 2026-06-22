@@ -1,0 +1,10 @@
+[Unit]
+Description=Track installed packages and commit changes to git
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.config/pkg-tracker.sh
+
+[Install]
+WantedBy=default.target

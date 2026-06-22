@@ -1,0 +1,16 @@
+[Unit]
+Description=Taildrop receiver into Obsidian Server-Infrastructure docs
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart="/home/kirill/.config/taildrop-sync/taildrop-recv-into-obsidian.sh" --foreground --dest "/home/kirill/Documents/Obsidian/notes/projects/infrastructure/Server-Infrastructure" --staging "/tmp/taildrop-obsidian-incoming"
+Restart=always
+RestartSec=3
+WorkingDirectory=/home/kirill
+StandardOutput=append:/home/kirill/.cache/taildrop-sync/taildrop-recv-obsidian.log
+StandardError=append:/home/kirill/.cache/taildrop-sync/taildrop-recv-obsidian.log
+
+[Install]
+WantedBy=default.target

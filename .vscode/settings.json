@@ -1,0 +1,7 @@
+{
+    "files.exclude": {
+        "**/battery-report-*.log": false
+    },
+    "explorer.excludeGitIgnore": false,
+    "css.validate": false
+}

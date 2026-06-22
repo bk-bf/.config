@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Block commits that contain secrets. Scans only STAGED changes.
+# Auto-detects the right gitleaks invocation across versions; skips if not installed.
+set -uo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "⚠ gitleaks not installed — skipping secret scan (sudo pacman -S gitleaks)" >&2
+  exit 0
+fi
+
+# Pick the staged-scan command supported by the installed gitleaks version.
+if gitleaks --help 2>&1 | grep -qw git && gitleaks git --help 2>&1 | grep -q -- '--staged'; then
+  cmd=(gitleaks git --staged --redact)
+elif gitleaks --help 2>&1 | grep -qw protect; then
+  cmd=(gitleaks protect --staged --redact)
+else
+  cmd=(gitleaks dir --redact .)
+fi
+
+if ! "${cmd[@]}"; then
+  echo "" >&2
+  echo "🚫 gitleaks detected a potential secret in your staged changes — commit blocked." >&2
+  echo "   Remove it, or override with: git commit --no-verify" >&2
+  exit 1
+fi

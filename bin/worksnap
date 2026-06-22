@@ -1,0 +1,128 @@
+#!/bin/bash
+# worksnap — workspace snapshot status and control
+#
+# Usage:
+#   worksnap [status]   — show last snapshot info (default)
+#   worksnap save       — take a snapshot now
+#   worksnap restore    — dry-run: show what would be launched
+#   worksnap restore -y — actually launch everything
+
+CMD=${1:-status}
+
+SNAPSHOT_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/workspace-snapshot"
+CLIENTS="$SNAPSHOT_DIR/clients.json"
+TIMESTAMP="$SNAPSHOT_DIR/timestamp"
+TIMESTAMP_RESTORED="$SNAPSHOT_DIR/timestamp.restored"
+KITTY_DIR="$SNAPSHOT_DIR/kitty"
+
+case "$CMD" in
+    status)
+        if [ -f "$TIMESTAMP" ]; then
+            SNAP_TIME=$(cat "$TIMESTAMP")
+            STATE="ready"
+        elif [ -f "$TIMESTAMP_RESTORED" ]; then
+            SNAP_TIME=$(cat "$TIMESTAMP_RESTORED")
+            STATE="restored"
+        else
+            echo "no snapshot found — run: worksnap save"
+            exit 0
+        fi
+
+        NOW=$(date +%s)
+        AGE=$((NOW - SNAP_TIME))
+        if   [ $AGE -lt 60 ];    then AGE_STR="${AGE}s ago"
+        elif [ $AGE -lt 3600 ];  then AGE_STR="$((AGE/60))m ago"
+        elif [ $AGE -lt 86400 ]; then AGE_STR="$((AGE/3600))h $((AGE%3600/60))m ago"
+        else                          AGE_STR="$((AGE/86400))d ago"
+        fi
+        DATE_STR=$(date -d "@$SNAP_TIME" "+%a %d %b %H:%M")
+
+        if [ "$STATE" = "restored" ]; then
+            echo "snapshot: $DATE_STR ($AGE_STR) [already restored]"
+        else
+            echo "snapshot: $DATE_STR ($AGE_STR)"
+        fi
+
+        # Window summary per workspace
+        if [ -f "$CLIENTS" ]; then
+            python3 - "$CLIENTS" "$KITTY_DIR" << 'PYEOF'
+import json, sys, collections
+from pathlib import Path
+
+with open(sys.argv[1]) as f:
+    clients = json.load(f)
+
+KITTY_DIR = Path(sys.argv[2])
+
+if not clients:
+    print("windows:  none recorded")
+    sys.exit(0)
+
+by_ws = collections.defaultdict(list)
+for c in clients:
+    by_ws[c["workspace"]["id"]].append(c["class"].lower())
+
+total = sum(len(v) for v in by_ws.values())
+parts = []
+for ws in sorted(by_ws):
+    summary = ", ".join(by_ws[ws])
+    parts.append(f"ws{ws}:[{summary}]")
+
+print(f"windows:  {total} total — {' '.join(parts)}")
+
+# Kitty detail: read per-instance metadata
+kitty_metas = sorted(KITTY_DIR.glob("*.json")) if KITTY_DIR.exists() else []
+if not kitty_metas:
+    has_kitty = any("kitty" in v for vals in by_ws.values() for v in vals)
+    if has_kitty:
+        print("kitty:    instances found but no session data (socket not ready?)")
+    else:
+        print("kitty:    not running at snapshot time")
+else:
+    lines = []
+    for meta_path in kitty_metas:
+        try:
+            m = json.loads(meta_path.read_text())
+        except Exception:
+            continue
+        ws    = m.get("workspace_id", "?")
+        tabs  = m.get("tabs", "?")
+        panes = m.get("panes", "?")
+        session_ok = meta_path.with_suffix(".session").exists()
+        status = "ok" if session_ok else "missing"
+        lines.append(f"ws{ws}: {tabs} tab(s), {panes} pane(s) [{status}]")
+    print("kitty:    " + " | ".join(lines))
+PYEOF
+        fi
+
+        # Timer status
+        TIMER_LINE=$(systemctl --user show battery-snapshot.timer \
+            --property=ActiveState 2>/dev/null)
+        ACTIVE=$(echo "$TIMER_LINE" | grep -oP '(?<=ActiveState=)\S+')
+        if [ "$ACTIVE" = "active" ]; then
+            TIMER_ROW=$(systemctl --user list-timers battery-snapshot.timer --no-pager 2>/dev/null | awk 'NR==2')
+            NEXT_LEFT=$(echo "$TIMER_ROW" | grep -oP '\d+s(?= )' | head -1)
+            LAST_PASSED=$(echo "$TIMER_ROW" | grep -oP '\S+ ago' | head -1)
+            echo "timer:    active — next in ${NEXT_LEFT:-?}, last ${LAST_PASSED:-?}"
+        else
+            echo "timer:    battery-snapshot inactive"
+        fi
+        ;;
+
+    save)
+        echo "saving snapshot..."
+        bash ~/.config/hypr/scripts/workspace-snapshot.sh
+        echo ""
+        worksnap status
+        ;;
+
+    restore)
+        shift
+        bash ~/.config/hypr/scripts/workspace-restore.sh "$@"
+        ;;
+
+    *)
+        echo "usage: worksnap [status|save|restore [-y]]"
+        exit 1
+        ;;
+esac

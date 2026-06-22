@@ -1,0 +1,115 @@
+@import url("noctalia-colors.css");
+
+/* Windows, dialogs */
+window,
+dialog,
+.background {
+  background-color: @window_bg_color;
+  color: @window_fg_color;
+}
+
+/* Menus (nm-applet, blueman right-click) */
+menu,
+menubar,
+.menu,
+.context-menu {
+  background-color: @popover_bg_color;
+  color: @window_fg_color;
+  border-radius: 12px;
+  border: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+menuitem,
+.menuitem {
+  background-color: transparent;
+  color: @window_fg_color;
+  border-radius: 8px;
+}
+
+menuitem:hover,
+.menuitem:hover {
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
+}
+
+menuitem:disabled,
+.menuitem:disabled {
+  color: @headerbar_border_color;
+}
+
+separator,
+.separator {
+  background-color: @headerbar_border_color;
+}
+
+/* Popovers (nm-applet connection picker etc.) */
+popover,
+.popover {
+  background-color: @popover_bg_color;
+  color: @popover_fg_color;
+  border-radius: 12px;
+  border: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+/* Tooltips */
+tooltip,
+.tooltip {
+  background-color: @card_bg_color;
+  color: @window_fg_color;
+  border-radius: 8px;
+  border: none;
+}
+
+tooltip label {
+  color: @window_fg_color;
+}
+
+/* Buttons */
+button {
+  background-color: @headerbar_bg_color;
+  color: @window_fg_color;
+  border-radius: 8px;
+  border: none;
+}
+
+button:hover {
+  background-color: @card_bg_color;
+}
+
+button:active,
+button:checked {
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
+}
+
+/* Scrollbars */
+scrollbar slider {
+  background-color: @headerbar_border_color;
+  border-radius: 999px;
+  min-width: 6px;
+  min-height: 6px;
+}
+
+scrollbar slider:hover {
+  background-color: @accent_bg_color;
+}
+
+/* Labels */
+label {
+  color: @window_fg_color;
+}
+
+/* Entry (text inputs) */
+entry {
+  background-color: @view_bg_color;
+  color: @view_fg_color;
+  border-radius: 8px;
+  border: 1px solid @headerbar_border_color;
+}
+
+entry:focus {
+  border-color: @accent_bg_color;
+  box-shadow: inset 0 0 0 1px @accent_bg_color;
+}

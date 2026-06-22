@@ -1,0 +1,6 @@
+[Unit]
+Description=Hyprflow autosave session
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/hyprflow autosave --now

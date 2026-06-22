@@ -1,0 +1,11 @@
+[Unit]
+Description=Runtime Power Management Optimization for S2idle
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/s2idle-optimize.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,62 @@
+# # In both .bashrc and .zshrc for .aliases
+#[ -r "$HOME/.aliases/aliases" ] && source "$HOME/.aliases/.aliases"
+
+# custom default aliases
+alias cl="clear"
+alias c="calc"
+alias off="shutdown -h now"
+_td_alert() {
+    notify-send -u normal "Timer Complete" "Countdown finished!" 
+    mpv --no-terminal /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga
+}
+td() {
+    termdown "$@" && _td_alert
+}
+wlc() { wl-copy < "$1"; }
+
+alias aliases="cat ~/.config/.aliases"
+
+# battery monitoring
+alias battod="tail -f ~/.local/share/powerstat/powerstat-$(date +%Y-%m-%d).log"
+alias batav="grep 'Average' ~/.local/share/powerstat/powerstat-$(date +%Y-%m-%d).log"
+alias bathour="awk '/^=== /{date=\$2; split(\$3,t,\":\"); hour=t[1]} /^Battery: /{gsub(/%.*/, \"\", \$2); bat[date\" \"hour]=\$2} /^ Average/{if(hour!=\"\") {sum[date\" \"hour]+=\$2; count[date\" \"hour]++}} END{for(h in sum) {pwr=sum[h]/count[h]; b=(h in bat)?bat[h]\"% - \":\"[no bat] - \"; printf \"%s:00 - %s%.2fW avg\n\", h, b, pwr}}' ~/.local/share/powerstat/powerstat-\$(date +%Y-%m-%d).log | sort"
+alias bat24h="find ~/.local/share/powerstat/ -name 'powerstat-*.log' -mtime -1 -exec awk '/^=== /{date=\$2; split(\$3,t,\":\"); hour=t[1]} /^Battery: /{gsub(/%.*/, \"\", \$2); bat[date\" \"hour]=\$2} /^ Average/{if(hour!=\"\") {sum[date\" \"hour]+=\$2; count[date\" \"hour]++}} END{for(h in sum) {pwr=sum[h]/count[h]; b=(h in bat)?bat[h]\"% - \":\"[no bat] - \"; printf \"%s:00 - %s%.2fW avg\n\", h, b, pwr}}' {} \; | sort"
+alias batmin="grep 'Minimum' ~/.local/share/powerstat/powerstat-\$(date +%Y-%m-%d).log | tail -20"
+alias batmax="grep 'Maximum' ~/.local/share/powerstat/powerstat-\$(date +%Y-%m-%d).log | tail -20"
+alias batrep="(echo '=== Battery Report - Last 24 Hours ===' && echo \"Generated: \$(date)\" && echo && echo '--- Hourly Power & Battery Status ---' && find ~/.local/share/powerstat/ -name 'powerstat-*.log' -mtime -1 -exec awk '/^=== /{date=\$2; split(\$3,t,\":\"); hour=t[1]} /^Battery: /{gsub(/%.*/, \"\", \$2); bat[date\" \"hour]=\$2} /^ Average/{if(hour!=\"\") {sum[date\" \"hour]+=\$2; count[date\" \"hour]++}} END{for(h in sum) {pwr=sum[h]/count[h]; b=(h in bat)?bat[h]\"% - \":\"[no bat data] - \"; printf \"%s:00 - %s%.2fW avg\n\", h, b, pwr}}' {} \; | sort && echo && echo '--- Battery Drain Rate ---' && find ~/.local/share/powerstat/ -name 'powerstat-*.log' -mtime -1 -exec awk '/^=== /{date=\$2; split(\$3,t,\":\"); time=\$2\" \"\$3} /^Battery: /{gsub(/%.*/, \"\", \$2); if(first_bat==\"\") {first_bat=\$2; first_time=time}; last_bat=\$2; last_time=time} END{if(first_bat!=\"\" && last_bat!=\"\") {drain=first_bat-last_bat; split(first_time,ft,\" \"); split(last_time,lt,\" \"); split(ft[2],fh,\":\"); split(lt[2],lh,\":\"); hours=(lt[1]!=ft[1]?24:0)+lh[1]-fh[1]+(lh[2]-fh[2])/60; if(hours>0) printf \"Battery drain: %.1f%% over %.1f hours (%.2f%%/hr)\\\\n\", drain, hours, drain/hours}}' {} \; && echo && echo '--- Overall Power Stats (Last 24h) ---' && find ~/.local/share/powerstat/ -name 'powerstat-*.log' -mtime -1 -exec grep 'Summary:' -A 2 {} \; | tail -10) | tee ~/.config/battery-report-\$(date +%Y%m%d-%H%M).log && echo && echo 'Report saved to ~/.config/battery-report-\$(date +%Y%m%d-%H%M).log'"
+
+# eza replacements (keeps your familiar ls/la workflow)
+alias ll='eza -lh --icons --color=always --group-directories-first --git'
+alias ls='eza -lh --icons --color=always --group-directories-first --git'
+alias la='eza -lha --icons --color=always --group-directories-first --git'
+
+# Additional eza aliases for extra functionality
+alias lt='eza -lhT --icons --color=always --group-directories-first --git --level=2'  # tree view
+alias l.='eza -lha --icons | grep -E "^\."'  # hidden files only
+
+# bat replacement
+alias cat='bat --paging=never --style=plain'
+alias catt='bat'  # full bat with paging and line numbers
+
+# custom aliases for entertainment
+alias ani="ani-cli"
+alias ya="yazi"
+
+# private pkglist repo (ubuntu server via Tailscale)
+alias pkgpush='git -C ~/.local/share/pkglist add -A && git -C ~/.local/share/pkglist commit -m "chore: update ($(date +%Y-%m-%d %H:%M))" && git -C ~/.local/share/pkglist push'
+alias pkgpull='git -C ~/.local/share/pkglist pull'
+alias pkglog='git -C ~/.local/share/pkglist log --oneline -10'
+alias pkgst='git -C ~/.local/share/pkglist status --short'
+
+# S2idle optimization monitoring
+alias s2check="systemctl status s2idle-optimize.service --no-pager"
+alias s2residency="sudo cat /sys/kernel/debug/pmc_core/slp_s0_residency_usec"
+alias s2devices="grep . /sys/bus/pci/devices/*/power/runtime_status 2>/dev/null | grep -v suspended"
+alias s2test="echo 'Close lid now. Note time. Open lid after 1 hour and run: s2residency' && s2residency"
+
+alias ht="hustle_tracker"
+alias t="tmux"
+alias lg="lazygit"
+alias op="opencode"
+alias cld="claude"
+alias tm="tmux"

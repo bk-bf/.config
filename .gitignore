@@ -1,0 +1,241 @@
+# copilot steering — local only
+.github/
+
+# ── Default-deny: new top-level directories are ignored unless whitelisted ──
+# To track a new directory, add !/<dirname>/ to the whitelist below.
+/*/
+
+# Symlinks to external repos — explicitly ignored so git doesn't track the
+# symlink object and later remove it on branch switches / git restore.
+/nvim-tdl
+/nvim
+
+# Whitelisted top-level directories
+!/.githooks/
+!/.vscode/
+!/Code/
+!/.custom-kernel/
+!/autostart/
+!/btop/
+!/cachyos/
+!/crossnote/
+!/.docs/
+!/gnome-builder/
+!/grub/
+!/gtk-3.0/
+!/gtk-4.0/
+!/bin/
+!/hypr/
+!/intel-undervolt/
+!/kitty/
+!/lazygit/
+!/mpv/
+!/noctalia/
+# nvim/ — now lives in tdl repo, symlinked from ~/.config/nvim
+!/nvim-treemux/
+!/pamac/
+!/qt6ct/
+!/s2idle/
+!/sddm/
+!/sioyek/
+!/systemd/
+!/tmux/
+!/xdg-desktop-portal/
+!/xsettingsd/
+
+# Cache directories
+**/Cache/
+**/CachedData/
+**/CachedExtensions/
+**/CachedExtensionVSIXs/
+**/CachedConfigurations/
+**/CachedProfilesData/
+**/Code Cache/
+**/GPUCache/
+**/DawnGraphiteCache/
+**/DawnWebGPUCache/
+**/component_crx_cache/
+
+# Storage and databases
+**/Local Storage/
+**/Session Storage/
+**/WebStorage/
+**/IndexedDB/
+**/databases/
+**/blob_storage/
+**/Service Worker/
+**/Shared Dictionary/
+**/shared_proto_db/
+
+# Cookies and session data
+Cookies
+Cookies-journal
+**/Cookies
+**/Cookies-journal
+
+# Network and security
+Network Persistent State
+TransportSecurity
+**/Network Persistent State
+**/TransportSecurity
+Trust Tokens*
+**/Trust Tokens*
+DIPS
+DIPS-wal
+**/DIPS
+**/DIPS-wal
+
+# Shared storage
+SharedStorage
+SharedStorage-wal
+**/SharedStorage
+**/SharedStorage-wal
+
+# Lock and socket files
+SingletonLock
+SingletonSocket
+SingletonCookie
+**/SingletonLock
+**/SingletonSocket
+**/SingletonCookie
+**/*.lock
+**/*.socket
+.org.chromium.Chromium.*
+**/.org.chromium.Chromium.*
+
+# Logs
+**/logs/
+**/*.log
+**/sentry/
+battery-report-*.log
+
+# Crash reports
+**/Crashpad/
+**/crash-reports/
+
+# Video and media stats
+**/VideoDecodeStats/
+**/Dictionaries/
+
+# Machine-specific files
+machineid
+**/machineid
+
+# Backups
+**/Backups/
+**/backup/
+**/*.backup
+**/*~
+!/taildrop-sync/
+!/documentation/
+
+# VS Code specific
+Code/Preferences
+Code/languagepacks.json
+Code/User/globalStorage/
+Code/User/workspaceStorage/
+Code/User/History/
+Code/User/sync/
+Code/User/chatLanguageModels.json
+Code/Cookies
+Code/Cookies-journal
+
+# Machine-specific / auto-generated state — never public
+cachyos-hello.json
+pavucontrol.ini
+user-dirs.locale
+user-dirs.dirs
+
+# Backup files
+**/*.bak
+
+# VS Code internal state
+Code/Partitions/
+Code/User/profiles/
+Code/User/agent-sessions.code-workspace
+
+# Theme generated files
+gtk-3.0/noctalia-colors.css
+gtk-4.0/noctalia-colors.css
+kitty/current-theme.conf
+
+# Session data
+session/
+
+# Pulse/Pipewire (machine-specific audio)
+pulse/
+pipewire/pipewire.conf.d/
+wireplumber/
+
+# Qt cache
+qt5ct/qss/
+qt6ct/qss/
+
+# GTK recent files and bookmarks (can be large)
+gtk-3.0/bookmarks
+gtk-4.0/bookmarks
+
+# Trash
+trashrc
+
+# KDE/Qt boilerplate — auto-generated, never intentionally configured
+plasmashellrc
+QtProject.confseprate
+Trolltech.conf
+baloofilerc
+kcminputrc
+arkrc
+
+# Nautilus (GNOME Files)
+nautilus/search-metadata
+
+# Environment (machine-specific)
+environment.d/
+
+# Various app caches and temp files
+*.tmp
+*.temp
+**/.DS_Store
+**/Thumbs.db
+
+# MPV watch history
+mpv/watch_later/
+
+# Fish shell history
+fish/fish_variables
+
+# Monitor configuration (machine-specific)
+monitors.xml
+
+# Forge stylesheet (generated)
+forge/stylesheet/
+
+# Builder
+gnome-builder/projects/
+
+# Autostart (might contain user-specific apps)
+# autostart/
+
+# IBus (input method cache)
+ibus/bus/
+
+# Temporary state files
+/tmp/
+*.pid
+/battery_monitor_state
+
+# GNOME runtime files
+.gsd-keyboard.settings-ported
+
+# systemd enable artifacts — auto-generated symlinks pointing outside the repo
+systemd/user/*.wants/
+systemd/user/**/*.wants/
+systemd/user/pipewire-session-manager.service
+
+# Packages
+ffssb/
+opencode/node_modules
+opencode/commands
+opencode/bun.lock
+ 
+
