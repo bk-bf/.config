@@ -1,0 +1,7 @@
+[Unit]
+Description=Reap stale VS Code Claude Code extension processes (>1 day old)
+Documentation=man:systemd.timer(5)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/claude-reaper.sh
