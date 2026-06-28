@@ -52,7 +52,7 @@ Leaked extension helpers (`anthropic.claude-code.*resources`) older than 1 day
 are terminated daily. Matched by cmdline, so the real `claude` CLI and VS Code
 itself are never touched.
 
-- Script: `~/.local/bin/claude-reaper.sh` (supports `--dry-run`)
+- Script: `~/.config/scripts/claude-reaper.sh` (supports `--dry-run`)
 - Service: `~/.config/systemd/user/claude-reaper.service` (`Type=oneshot`)
 - Timer: `~/.config/systemd/user/claude-reaper.timer` (`OnCalendar=daily`,
   `Persistent=true`, catches up after sleep)
@@ -94,14 +94,14 @@ ps -eo pid,%cpu,%mem,etime,comm --sort=-%mem | head
 ### Check status
 ```bash
 systemctl --user list-timers claude-reaper.timer   # next reap run
-~/.local/bin/claude-reaper.sh --dry-run            # what it WOULD reap now
+~/.config/scripts/claude-reaper.sh --dry-run            # what it WOULD reap now
 systemctl --user show session.slice -p MemoryHigh  # current soft cap
 systemctl is-active systemd-oomd.service systemd-oomd.socket  # both: inactive
 ```
 
 ### Manual reap (immediate relief)
 ```bash
-~/.local/bin/claude-reaper.sh
+~/.config/scripts/claude-reaper.sh
 ```
 
 ---
@@ -109,7 +109,7 @@ systemctl is-active systemd-oomd.service systemd-oomd.socket  # both: inactive
 ## Tuning
 
 - **Reaper too aggressive / too lax?** Change the age threshold:
-  `CLAUDE_REAPER_MAX_AGE=43200 ~/.local/bin/claude-reaper.sh` (seconds), or edit
+  `CLAUDE_REAPER_MAX_AGE=43200 ~/.config/scripts/claude-reaper.sh` (seconds), or edit
   the default in the script.
 - **Apps feel throttled?** Raise the soft cap — edit
   `session.slice.d/memory.conf` and re-run
