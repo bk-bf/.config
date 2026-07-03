@@ -168,6 +168,46 @@ systemctl --user enable --now polkit-agent.service
 systemctl --user enable --now theme-watch.service
 systemctl --user enable --now powerstat-logger.service
 
+# ── Shell (zsh + oh-my-zsh) ────────────────────────────────────────────────────
+
+echo ""
+echo "==> Setting up zsh shell..."
+
+# Symlink .zshrc / .zshenv from the repo into $HOME (backup any pre-existing file)
+for f in .zshrc .zshenv; do
+    if [[ -e "$HOME/$f" && ! -L "$HOME/$f" ]]; then
+        mv "$HOME/$f" "$HOME/$f.pre-config.bak"
+        echo "    backed up existing ~/$f → ~/$f.pre-config.bak"
+    fi
+    ln -sfn "$CONFIG/$f" "$HOME/$f"
+done
+echo "    .zshrc, .zshenv → symlinked from repo"
+
+# Install oh-my-zsh + powerlevel10k theme + plugins (idempotent; .aliases/.p10k.zsh
+# are tracked in the repo, so only the framework needs cloning here)
+ZSH_DIR="$HOME/.oh-my-zsh"
+if [[ ! -d "$ZSH_DIR" ]]; then
+    git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git "$ZSH_DIR"
+    echo "    oh-my-zsh → cloned"
+fi
+ZSH_CUSTOM="$ZSH_DIR/custom"
+clone_omz() {  # $1 = target dir, $2 = repo url
+    [[ -d "$1" ]] || { git clone --depth=1 "$2" "$1"; echo "    $(basename "$1") → cloned"; }
+}
+clone_omz "$ZSH_CUSTOM/themes/powerlevel10k"          https://github.com/romkatv/powerlevel10k.git
+clone_omz "$ZSH_CUSTOM/plugins/zsh-autosuggestions"   https://github.com/zsh-users/zsh-autosuggestions.git
+clone_omz "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" https://github.com/zsh-users/zsh-syntax-highlighting.git
+
+# Make zsh the login shell
+ZSH_BIN="$(command -v zsh || true)"
+if [[ -n "$ZSH_BIN" && "$(getent passwd "$(whoami)" | cut -d: -f7)" != "$ZSH_BIN" ]]; then
+    if chsh -s "$ZSH_BIN"; then
+        echo "    login shell → zsh"
+    else
+        WARNINGS+=("zsh: chsh failed — set it manually: chsh -s $ZSH_BIN")
+    fi
+fi
+
 # ── Package tracker ───────────────────────────────────────────────────────────
 
 echo ""
@@ -190,7 +230,7 @@ echo ""
 echo "==> Done. Remaining manual steps:"
 echo "    1. Place wallpaper at ~/Pictures/Wallpaper/wallpaper.png"
 echo "    2. Run: ~/.config/hypr/scripts/theme-sync.sh"
-echo "    3. Log out and select 'Hyprland (uwsm)' from SDDM"
+echo "    3. Log out and select 'Hyprland (uwsm)' from SDDM (also activates zsh login shell)"
 ! $IS_LAPTOP  && echo "    4. Edit hyprland.conf — remove touchpad/lid/brightness input settings"
 [[ "$GPU_VENDOR" != "intel" ]] && \
     echo "    5. Edit hyprland.conf — replace intel-media-driver env vars for $GPU_VENDOR GPU"
