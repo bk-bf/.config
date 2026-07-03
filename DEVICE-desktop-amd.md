@@ -21,6 +21,12 @@ Forked from `hyprland-noctalia` (laptop / Galaxy Book) and adapted for this mach
   `intel-undervolt`, `vulkan-intel`, `lib32-vulkan-intel`, `vpl-gpu-rt`;
   added `amd-ucode`, `vulkan-radeon`, `lib32-vulkan-radeon`, `libva-mesa-driver`, `libva-utils`.
 - `install.sh` GRUB / intel-undervolt / s2idle blocks auto-skip (not a Galaxy Book) — Limine used instead.
+- **pkglist conflicts removed** (would fail `yay`/`pacman` on this box):
+  - `timeshift`, `timeshift-autosnap` — conflict `cachyos-snapper-support` (we use snapper→Limine)
+  - `grub`, `grub-btrfs`, `grub-hook`, `cachyos-grub-theme` — GRUB, but this box boots Limine
+  - `noctalia-shell-git` — conflicts installed repo `noctalia-shell` (same 4.7.7)
+  - `libva-mesa-driver` — VAAPI now ships inside `mesa`
+  - Pre-flight with `scripts/pkglist-conflict-scan.sh` before running `install.sh`.
 
 ## Notes / gotchas
 - **HDMI input "flapping":** the BALHVIT HDMI switch on HDMI-A-1 auto-selects whichever input
