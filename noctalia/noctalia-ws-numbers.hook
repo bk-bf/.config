@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = noctalia-shell
+
+[Action]
+Description = Relabeling Noctalia second-monitor workspaces 11-19 as 1-9...
+When = PostTransaction
+Exec = /home/kirill/.config/noctalia/patch-workspace-numbers.sh
