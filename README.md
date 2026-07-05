@@ -112,8 +112,9 @@ for the full symlink map.
 <details>
 <summary>Manual package install (reference)</summary>
 
-All packages are tracked in `pkglist.txt` and auto-updated on every pacman transaction.
-To install manually:
+All packages are tracked per-machine in a private repo and auto-updated on every pacman
+transaction (`~/.config/pkglist.txt` is a symlink to this host's list — see
+`.docs/packages/PACKAGE_TRACKING.md`). To install manually:
 
 ```bash
 yay -S --needed - < ~/.config/pkglist.txt
@@ -196,8 +197,8 @@ See [documentation/packages/PACKAGE_TRACKING.md](documentation/packages/PACKAGE_
 ```
 ~/.config/
 ├── install.sh                 # Post-clone setup — symlinks, services, hardware detection
-├── pkglist.txt                # All explicitly installed packages (auto-updated)
-├── pkg-tracker.sh             # Regenerates pkglist.txt + git commits on change
+├── pkglist.txt                # Symlink → this host's list in the private repo (auto-updated)
+├── pkg-tracker.sh             # Bootstraps repo + regenerates/commits this host's pkglist
 ├── pkg-tracker.hook           # Pacman hook source — symlinked to /etc/pacman.d/hooks/
 ├── sddm/
 │   └── sddm.conf              # Reference template — install.sh writes /etc/sddm.conf dynamically (HiDPI-aware)

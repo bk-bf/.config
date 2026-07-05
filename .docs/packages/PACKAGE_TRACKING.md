@@ -2,12 +2,16 @@
 
 ## Overview
 
-Explicitly installed packages are tracked in `pkglist.txt` and auto-committed to a private git
-repository. The goal is fast machine replication — `pkglist.txt` is the single source of truth
-for what belongs on the system.
+Explicitly installed packages are tracked in a `pkglist.txt` and auto-committed to a private git
+repository. The goal is fast machine replication — each machine's `pkglist.txt` is the single
+source of truth for what belongs on that system.
 
-`~/.config/pkglist.txt` is a symlink to the canonical file in the private repo. It is not
-tracked in this public repo. See `documentation/private/PKGLIST_INFRA.md` for infrastructure
+The private repo is **shared by every machine**. To avoid machines clobbering each other's list,
+each host writes to its own directory, `hosts/<tailscale-hostname>/pkglist.txt`, keyed by the
+machine's Tailscale name (e.g. `hosts/cachyos-x8664-desktop/pkglist.txt`).
+
+`~/.config/pkglist.txt` is a symlink to *this* host's canonical file in the private repo. It is
+not tracked in this public repo. See `documentation/private/PKGLIST_INFRA.md` for infrastructure
 details (local only, not in public repo).
 
 ---
@@ -16,9 +20,10 @@ details (local only, not in public repo).
 
 | File                                                         | Purpose                                                           |
 | ------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `~/.local/share/pkglist/pkglist.txt`                         | Canonical package list (`pacman -Qqe` output) — private git repo  |
-| `~/.config/pkglist.txt`                                      | Symlink → `~/.local/share/pkglist/pkglist.txt`                    |
-| `~/.config/pkg-tracker.sh`                                   | Regenerates list, commits + pushes to private server              |
+| `~/.local/share/pkglist/`                                    | Clone of the shared private repo (`ubuntu:git/pkglist.git`)        |
+| `~/.local/share/pkglist/hosts/<tailscale-host>/pkglist.txt`  | This host's canonical package list (`pacman -Qqe` output)         |
+| `~/.config/pkglist.txt`                                      | Symlink → this host's `hosts/<tailscale-host>/pkglist.txt`        |
+| `~/.config/pkg-tracker.sh`                                   | Bootstraps repo, regenerates list, commits + pushes to server     |
 | `~/.config/systemd/user/pkg-tracker.service`                 | oneshot service that runs the script                              |
 | `~/.config/systemd/user/pkg-tracker.timer`                   | Fires the service daily                                           |
 | `~/.config/pkg-tracker.hook`                                 | Hook source — symlinked to `/etc/pacman.d/hooks/pkg-tracker.hook` |
@@ -33,7 +38,7 @@ details (local only, not in public repo).
 
 ## How It Works
 
-Two triggers keep `pkglist.txt` up to date automatically:
+Two triggers keep the list up to date automatically:
 
 **Pacman hook** — fires immediately after any `yay`/`pacman` transaction (install, remove,
 upgrade). Defined in `/etc/pacman.d/hooks/pkg-tracker.hook` with `Target = *` so it catches
@@ -43,8 +48,14 @@ every package operation without exception.
 the hook might miss (e.g. manual edits, AUR helpers that bypass hooks).
 
 Both invoke `pkg-tracker.sh`, which:
-1. Runs `pacman -Qqe` and writes the output to `pkglist.txt`
-2. `git add`s the file and commits only if it actually changed
+1. **Bootstraps** on first run — clones `ubuntu:git/pkglist.git` into `~/.local/share/pkglist/`
+   if it's missing, so a fresh machine works straight from the hook (no manual setup).
+2. Resolves this host's Tailscale name and ensures `hosts/<tailscale-host>/` exists, then points
+   `~/.config/pkglist.txt` at that host's `pkglist.txt`.
+3. Runs `pacman -Qqe` and writes the output to `hosts/<tailscale-host>/pkglist.txt`.
+4. `git add`s the file and commits only if it actually changed, then `git pull --rebase` (to pick
+   up other machines' pushes) and `git push`. A failed push is logged and retried next run, so it
+   never reports the pacman hook as failed.
 
 ---
 
@@ -54,11 +65,14 @@ Both invoke `pkg-tracker.sh`, which:
 # Clone your config repo
 git clone <your-repo> ~/.config
 
-# Set up the private pkglist repo — see documentation/private/PKGLIST_INFRA.md
-# (requires private infrastructure to be accessible)
+# Bootstrap the private pkglist repo (clones it + sets up the symlink).
+# Requires the private infra to be reachable (Tailscale up, SSH key present) —
+# see documentation/private/PKGLIST_INFRA.md.
+~/.config/pkg-tracker.sh
 
-# Install all packages (yay handles both official and AUR)
-yay -S --needed - < ~/.config/pkglist.txt
+# Install this machine's packages, OR replicate another machine's:
+yay -S --needed - < ~/.config/pkglist.txt                                  # this host
+yay -S --needed - < ~/.local/share/pkglist/hosts/<other-host>/pkglist.txt  # clone another host
 ```
 
 Dependencies not in `pkglist.txt` are pulled in automatically by pacman's resolver — only
@@ -82,8 +96,11 @@ See `documentation/private/PKGLIST_INFRA.md` for the full setup procedure includ
 repository initialisation and infrastructure requirements.
 
 ```bash
-# After private repo is cloned and symlink is in place:
 chmod +x ~/.config/pkg-tracker.sh
+
+# First run clones the private repo, creates hosts/<tailscale-host>/, and
+# sets up the ~/.config/pkglist.txt symlink automatically.
+~/.config/pkg-tracker.sh
 
 # Symlink all system-level config files (requires root)
 sudo ln -sf ~/.config/pkg-tracker.hook /etc/pacman.d/hooks/pkg-tracker.hook
@@ -97,9 +114,6 @@ sudo systemctl daemon-reload
 
 # Enable the daily timer
 systemctl --user enable --now pkg-tracker.timer
-
-# Generate initial list
-~/.config/pkg-tracker.sh
 ```
 
 ---
