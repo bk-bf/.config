@@ -90,10 +90,6 @@ SCALE_ENV=""
 $IS_HIDPI_LAPTOP && SCALE_ENV=",QT_SCALE_FACTOR=2"
 
 sudo tee /etc/sddm.conf > /dev/null <<EOF
-[Autologin]
-User=$(whoami)
-Session=hyprland-uwsm
-
 [General]
 InputMethod=qtvirtualkeyboard
 GreeterEnvironment=QML2_IMPORT_PATH=/usr/share/sddm/themes/silent/components/,QT_IM_MODULE=qtvirtualkeyboard${SCALE_ENV}
