@@ -58,5 +58,17 @@ alias ht="hustle_tracker"
 alias t="tmux"
 alias lg="lazygit"
 alias op="opencode"
-alias cld="claude"
+# claude launcher: `cld -lg` splits kitty (claude left, lazygit right, same dir)
+cld() {
+    if [[ "$1" == "-lg" ]]; then
+        shift
+        if [[ -n "$KITTY_LISTEN_ON" ]] && command -v kitten >/dev/null 2>&1; then
+            kitten @ --to "$KITTY_LISTEN_ON" launch \
+                --location=vsplit --cwd=current --keep-focus lazygit
+        else
+            echo "cld -lg: not inside kitty (or kitten missing); launching claude only" >&2
+        fi
+    fi
+    claude "$@"
+}
 alias tm="tmux"
