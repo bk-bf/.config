@@ -171,13 +171,6 @@
                     "textColor": "none"
                 },
                 {
-                    "applyToAllMonitors": false,
-                    "displayMode": "alwaysShow",
-                    "iconColor": "none",
-                    "id": "Brightness",
-                    "textColor": "none"
-                },
-                {
                     "defaultSettings": {
                         "compactMode": false,
                         "defaultDuration": 0,
@@ -194,12 +187,6 @@
                         "updateTerminalCommand": "foot -e"
                     },
                     "id": "plugin:update-count"
-                },
-                {
-                    "displayMode": "alwaysHide",
-                    "iconColor": "none",
-                    "id": "Bluetooth",
-                    "textColor": "none"
                 },
                 {
                     "displayMode": "alwaysHide",
@@ -665,7 +652,7 @@
     },
     "wallpaper": {
         "automationEnabled": false,
-        "directory": "/home/kirill/Pictures/Wallpapers",
+        "directory": "/home/kirill/Pictures/Wallpaper",
         "enableMultiMonitorDirectories": false,
         "enabled": true,
         "favorites": [
