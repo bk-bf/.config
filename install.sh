@@ -157,6 +157,16 @@ fi
 
 sudo systemctl daemon-reload
 
+# ── User bin shims ────────────────────────────────────────────────────────────
+# hyprflow derives its session-restore command from the window class ("zen"),
+# but the Zen binary is `zen-browser`. Symlink so `zen` resolves on ~/.local/bin
+# (on PATH) and hyprflow can relaunch it like every other app.
+if command -v zen-browser &>/dev/null; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sfn "$(command -v zen-browser)" "$HOME/.local/bin/zen"
+    echo "    zen → symlinked to zen-browser (hyprflow restore)"
+fi
+
 # ── User services ─────────────────────────────────────────────────────────────
 
 echo ""
@@ -167,6 +177,9 @@ systemctl --user enable --now pkg-tracker.timer
 systemctl --user enable --now polkit-agent.service
 systemctl --user enable --now theme-watch.service
 systemctl --user enable --now powerstat-logger.service
+# hyprflow autosave timer — captures the window/workspace session every 10 min so
+# `hyprflow restore` (exec-once in hyprland.conf) has a session to replay on login.
+systemctl --user enable --now hyprflow-autosave.timer
 
 # ── Shell (zsh + oh-my-zsh) ────────────────────────────────────────────────────
 
