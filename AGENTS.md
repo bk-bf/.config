@@ -9,7 +9,8 @@ Personal Arch/CachyOS dotfiles for a Hyprland + Noctalia desktop. Configuration 
 ## Rules
 
 - **Never commit secrets.** Check `.git/info/exclude` and `.gitignore` before staging anything new.
-- **Never push** unless explicitly asked.
+- **Always commit and push.** In this repo, commit every change and push it to origin without being asked.
+- **Never create git worktrees** (`git worktree add`, EnterWorktree, or any auto-isolation) unless I explicitly ask for one. This is a dotfiles repo — the working copy *is* the live config, so edit files in place here. (Enforced for background jobs via `worktree.bgIsolation: "none"` in `.claude/settings.json`.)
 - **Never install packages** or run `yay`/`pacman` unless explicitly asked.
 - **Never run `hyprctl reload`** or restart services unless explicitly asked — this is a live desktop.
 - `install.sh` writes symlinks to `/etc` and `/usr/local/bin`. Don't run it unless asked.
@@ -32,7 +33,7 @@ Use `/commit` to stage and commit without confirmation.
 
 | Command | Description |
 |---|---|
-| `/commit` | `git add -A`, inspect diff, commit with conventional message. No push. No confirmation. |
+| `/commit` | `git add -A`, inspect diff, commit with conventional message, then push. No confirmation. |
 | `/udoc <file>` | Update a documentation file to reflect current codebase state. |
 
 ## Sensitive paths (never commit)
