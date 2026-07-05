@@ -244,6 +244,11 @@ ffssb/
 opencode/node_modules
 opencode/commands
 opencode/bun.lock
+
+# App-generated churn — rewritten by KDE apps / xdg on use, not hand-managed
+/kdeglobals
+/dolphinrc
+/mimeapps.list
  
 
 
