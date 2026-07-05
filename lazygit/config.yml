@@ -1,0 +1,4 @@
+git:
+  # Run pre-commit hooks (gitleaks) for ALL commits — don't let WIP-prefixed
+  # commits skip the secret scan. Default was "WIP".
+  skipHookPrefix: ""
