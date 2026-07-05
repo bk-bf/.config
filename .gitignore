@@ -45,6 +45,11 @@
 !/xdg-desktop-portal/
 !/xsettingsd/
 
+# Track only the bg-job worktree guard; the rest of .claude/ is runtime state
+!/.claude/
+/.claude/*
+!/.claude/settings.json
+
 # Cache directories
 **/Cache/
 **/CachedData/
@@ -182,7 +187,7 @@ trashrc
 
 # KDE/Qt boilerplate — auto-generated, never intentionally configured
 plasmashellrc
-QtProject.confseprate
+QtProject.conf
 Trolltech.conf
 baloofilerc
 kcminputrc
@@ -246,3 +251,4 @@ opencode/bun.lock
 /kdeglobals
 /dolphinrc
 /mimeapps.list
+/electron-builder.json
