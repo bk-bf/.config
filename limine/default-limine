@@ -1,0 +1,12 @@
+# /etc/default/limine — overrides /etc/limine-entry-tool.conf (installed by install.sh).
+# Only the keys set here override the shipped defaults.
+
+# Sort kernel entries alphabetically so linux-cachyos lists before linux-cachyos-lts.
+ENABLE_SORT=yes
+
+# Galaxy Book kernel cmdline is NOT pinned here: limine-update captures it from the
+# live /proc/cmdline, which already carries the tuning params. On a *fresh* install
+# where they aren't in the running cmdline yet, pin them explicitly (root/rootflags
+# from your disk), e.g.:
+#
+#   KERNEL_CMDLINE[default]=root=UUID=<root> rw rootflags=subvol=@ nowatchdog nvme_load=YES zswap.enabled=0 splash loglevel=3 acpi_osi=! "acpi_osi=Windows 2022" acpi.debug_layer=0x00000004 acpi.debug_level=0x00000002 mem_sleep_default=s2idle i915.enable_fbc=1 i915.enable_dc=2 pcie_aspm.policy=powersupersave

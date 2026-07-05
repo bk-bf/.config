@@ -21,7 +21,6 @@
 !/crossnote/
 !/.docs/
 !/gnome-builder/
-!/grub/
 !/gtk-3.0/
 !/gtk-4.0/
 !/bin/
@@ -29,6 +28,7 @@
 !/intel-undervolt/
 !/kitty/
 !/lazygit/
+!/limine/
 !/mpv/
 !/noctalia/
 # nvim/ — now lives in tdl repo, symlinked from ~/.config/nvim
@@ -41,6 +41,7 @@
 !/sioyek/
 !/systemd/
 !/tmux/
+!/uwsm/
 !/xdg-desktop-portal/
 !/xsettingsd/
 

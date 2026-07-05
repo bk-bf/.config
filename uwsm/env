@@ -1,0 +1,8 @@
+# uwsm environment — sourced by uwsm before the compositor starts.
+# ~/.config IS the dotfiles repo, so this file is applied directly (no symlink).
+
+# Force Hyprland to load the legacy hyprland.conf (this repo) instead of the
+# CachyOS default Lua config (/usr/share/hypr/hyprland.lua). Loading the Lua
+# layer is what emits the "not started with start-hyprland" nag on every login
+# under the uwsm session; pointing HYPRLAND_CONFIG straight at the .conf skips it.
+export HYPRLAND_CONFIG="$HOME/.config/hypr/hyprland.conf"

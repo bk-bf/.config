@@ -17,7 +17,7 @@
 - ✅ Runtime PM service: `s2idle-optimize.service` (active now) — source-controlled at `~/.config/s2idle/s2idle-optimize.service`, symlinked to `/etc/systemd/system/`
 - ✅ Script: `/usr/local/bin/s2idle-optimize.sh` — source-controlled at `~/.config/s2idle/s2idle-optimize.sh`, symlinked to `/usr/local/bin/`
 - ✅ Monitoring aliases: `s2check`, `s2residency`, `s2devices`, `s2test`
-- ⏳ Kernel parameters: Added to GRUB (apply on reboot)
+- ✅ Kernel parameters: carried in the Limine cmdline (live `/proc/cmdline`)
 
 ---
 
@@ -60,7 +60,7 @@ Enables aggressive power saving for all devices on boot:
 - SATA: Link power management
 
 ### Kernel Parameters (Apply on Reboot)
-Added to `/etc/default/grub`:
+Kernel cmdline params (carried by Limine via `/proc/cmdline` — see [../boot/LIMINE.md](../boot/LIMINE.md)):
 ```
 mem_sleep_default=s2idle          # Explicit s2idle mode
 i915.enable_fbc=1                 # Framebuffer compression
@@ -83,9 +83,10 @@ Found 12+ devices blocking deep S0ix substates:
 **Cause:** PCIe ASPM too aggressive  
 **Fix:**
 ```bash
-sudo nano /etc/default/grub
-# Remove: pcie_aspm.policy=powersupersave
-sudo grub-mkconfig -o /boot/grub/grub.cfg
+# Kernel params ride the live cmdline under Limine. To drop one persistently, pin the
+# cmdline without pcie_aspm.policy=powersupersave in /etc/default/limine
+# (KERNEL_CMDLINE[default]=…) — see ../boot/LIMINE.md — then regenerate:
+sudo limine-update
 sudo reboot
 ```
 
@@ -137,8 +138,9 @@ sudo rm /usr/local/bin/s2idle-optimize.sh
 
 ### Remove Kernel Parameters
 ```bash
-sudo cp /etc/default/grub.before-s2idle-opt /etc/default/grub
-sudo grub-mkconfig -o /boot/grub/grub.cfg
+# Clear any KERNEL_CMDLINE override so Limine falls back to the stock cmdline:
+sudo sed -i '/^KERNEL_CMDLINE/d' /etc/default/limine
+sudo limine-update
 sudo reboot
 ```
 

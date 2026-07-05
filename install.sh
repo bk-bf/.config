@@ -111,23 +111,45 @@ echo "==> Creating system symlinks..."
 sudo mkdir -p /etc/pacman.d/hooks
 sudo ln -sf "$CONFIG/pkg-tracker.hook" /etc/pacman.d/hooks/pkg-tracker.hook
 
-# ── GRUB ─────────────────────────────────────────────────────────────────────
+# ── User bin shims ────────────────────────────────────────────────────────────
+# hyprflow derives its session-restore command from the window class ("zen"),
+# but the Zen binary is `zen-browser`. Symlink so `zen` resolves on ~/.local/bin
+# (on PATH) and hyprflow can relaunch it like every other app.
+if command -v zen-browser &>/dev/null; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sfn "$(command -v zen-browser)" "$HOME/.local/bin/zen"
+    echo "    zen → symlinked to zen-browser (hyprflow restore)"
+fi
+
+# ── Limine ────────────────────────────────────────────────────────────────────
+# CachyOS Limine stack (replaces GRUB). limine-mkinitcpio-hook regenerates
+# $ESP/limine.conf on each kernel build; boot snapshots via limine-snapper-sync
+# (snap-pac makes pre/post-pacman snapshots). See .docs/boot/LIMINE.md.
+
+echo ""
+echo "==> Configuring Limine bootloader..."
+sudo pacman -S --needed limine limine-mkinitcpio-hook limine-snapper-sync cachyos-snapper-support
+
+ESP="$(bootctl --print-esp-path 2>/dev/null || echo /boot/efi)"
+
+# Sort kernel entries so linux-cachyos lists before linux-cachyos-lts.
+sudo install -m 0644 "$CONFIG/limine/default-limine" /etc/default/limine
+echo "    limine → /etc/default/limine installed (ENABLE_SORT)"
+
+# Theme (Catppuccin Mocha, diegons490): wallpaper asset on the ESP + header keys.
+# limine-entry-tool preserves these header keys across regeneration.
+sudo cp "$CONFIG/limine/limine-splash.png" "$ESP/limine-splash.png"
+if [[ -f "$ESP/limine.conf" ]] && ! sudo grep -q '^wallpaper:' "$ESP/limine.conf"; then
+    sudo sed -i "/^timeout:/r $CONFIG/limine/theme.conf" "$ESP/limine.conf"
+    sudo sed -i 's|^default_entry: .*|default_entry: CachyOS/linux-cachyos|' "$ESP/limine.conf"
+    echo "    limine → theme + default kernel applied"
+fi
 
 if $IS_GALAXY_BOOK; then
-    sudo ln -sf "$CONFIG/grub/grub" /etc/default/grub
-    echo "    grub → symlinked (Galaxy Book kernel params)"
-    sudo mkdir -p /etc/default/grub.d
-    sudo install -m 0644 "$CONFIG/grub/galaxybook-top-level.cfg" /etc/default/grub.d/galaxybook-top-level.cfg
-    echo "    grub/galaxybook-top-level.cfg → installed (auto-selects highest cachyos-galaxybook kernel)"
-else
-    WARNINGS+=("grub: $CONFIG/grub/grub contains Galaxy Book–specific kernel params")
-    WARNINGS+=("      (s2idle, i915.enable_fbc, pcie_aspm) — review before linking")
-    if [[ "$GPU_VENDOR" != "intel" ]]; then
-        WARNINGS+=("      i915 params are Intel GPU–only and will cause issues on $GPU_VENDOR GPU")
-    fi
-    if [[ "$CPU_VENDOR" != "intel" ]]; then
-        WARNINGS+=("      mem_sleep_default=s2idle was tuned for Intel — verify it applies to $CPU_VENDOR")
-    fi
+    WARNINGS+=("limine: confirm $ESP/limine.conf cmdline carries the Galaxy Book params")
+    WARNINGS+=("        (acpi_osi, mem_sleep_default=s2idle, i915.*, pcie_aspm.*).")
+    WARNINGS+=("        They ride the live /proc/cmdline; on a fresh install pin them in")
+    WARNINGS+=("        /etc/default/limine (KERNEL_CMDLINE[default]) — see .docs/boot/LIMINE.md")
 fi
 
 # ── intel-undervolt ───────────────────────────────────────────────────────────
@@ -181,8 +203,9 @@ if $IS_GALAXY_BOOK; then
     echo "==> Enabling hardware tuning services..."
     sudo systemctl enable --now intel-undervolt
     sudo systemctl enable --now s2idle-optimize.service
-    sudo grub-mkconfig -o /boot/grub/grub.cfg
 fi
+
+sudo limine-update
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
