@@ -249,11 +249,4 @@ opencode/bun.lock
 /kdeglobals
 /dolphinrc
 /mimeapps.list
- 
-
-
-# App-generated churn — rewritten by KDE apps / xdg on use, not hand-managed
-/kdeglobals
-/dolphinrc
-/mimeapps.list
 /electron-builder.json
