@@ -1,7 +1,53 @@
 {
+    // ── Explorer declutter ───────────────────────────────────────────────
+    // Hide heavyweight, non-config dirs (bundled app data / scratch projects).
+    // Visual only — has no effect on git.
     "files.exclude": {
-        "**/battery-report-*.log": false
+        "**/battery-report-*.log": false,
+        "**/f4x-electron-spike": true,
+        "**/vesktop": true,
+        "**/mozilla": true,
+        "**/discord": true,
+        "**/ffssb": true
     },
     "explorer.excludeGitIgnore": false,
-    "css.validate": false
+    "css.validate": false,
+
+    // ── File watcher (THE fix) ───────────────────────────────────────────
+    // Stop VS Code from live-watching ~130k cache/app files. This is what was
+    // choking the UI and Source Control refreshes. Merges with user settings.
+    "files.watcherExclude": {
+        "**/f4x-electron-spike/**": true,
+        "**/vesktop/**": true,
+        "**/mozilla/**": true,
+        "**/discord/**": true,
+        "**/ffssb/**": true,
+        "**/opencode/node_modules/**": true,
+        "**/Code/Cache/**": true,
+        "**/Code/CachedData/**": true,
+        "**/Code/CachedExtensionVSIXs/**": true,
+        "**/Code/Code Cache/**": true,
+        "**/Code/GPUCache/**": true,
+        "**/Code/Crashpad/**": true,
+        "**/Code/logs/**": true,
+        "**/Code/Service Worker/**": true,
+        "**/Code/Session Storage/**": true,
+        "**/Code/Local Storage/**": true,
+        "**/Code/User/globalStorage/**": true,
+        "**/Code/User/workspaceStorage/**": true,
+        "**/Code/User/History/**": true
+    },
+
+    // ── Search / quick-open ──────────────────────────────────────────────
+    "search.exclude": {
+        "**/f4x-electron-spike": true,
+        "**/vesktop": true,
+        "**/mozilla": true,
+        "**/discord": true,
+        "**/ffssb": true,
+        "**/Code/CachedData": true,
+        "**/Code/User/globalStorage": true,
+        "**/Code/User/workspaceStorage": true,
+        "**/Code/User/History": true
+    }
 }

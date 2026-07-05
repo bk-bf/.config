@@ -93,7 +93,7 @@
   "git.enableSmartCommit": true,
   "git.ignoredRepositories": ["/home/kirill/.config/ffssb"],
   "opencodego.customBaseUrl": "https://openrouter.ai/api/v1",
-  "opencodego.commitModel": "deepseek/deepseek-chat-v3-0324:free",
+  "opencodego.commitModel": "deepseek-v4-pro",
   "javascript.updateImportsOnFileMove.enabled": "never",
   "svelte.enable-ts-plugin": true,
   "gitlens.ai.largePromptWarningThreshold": 100000,
