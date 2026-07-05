@@ -49,6 +49,11 @@
 !/xdg-desktop-portal/
 !/xsettingsd/
 
+# Track only the bg-job worktree guard; the rest of .claude/ is runtime state
+!/.claude/
+/.claude/*
+!/.claude/settings.json
+
 # Cache directories
 **/Cache/
 **/CachedData/
