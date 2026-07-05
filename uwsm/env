@@ -3,8 +3,11 @@ export TERM=xterm-kitty
 export QT_QPA_PLATFORM="wayland;xcb"
 export QT_QPA_PLATFORMTHEME="qt6ct"
 export ELECTRON_OZONE_PLATFORM_HINT=auto
-export HYPRCURSOR_THEME="Adwaita"
-export HYPRCURSOR_SIZE=24
+# Adwaita ships only as an Xcursor theme (no hyprcursor variant installed), so
+# HYPRCURSOR_THEME is intentionally left unset — with it set to a missing theme
+# Hyprland falls back to its built-in default cursor. Leaving it unset makes
+# Hyprland use the Xcursor below. (Bibata-Modern-Ice does have a hyprcursor if
+# you ever want the native path back.)
 export XCURSOR_THEME="Adwaita"
 export XCURSOR_SIZE=24
 
