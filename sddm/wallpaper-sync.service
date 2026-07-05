@@ -1,0 +1,12 @@
+[Unit]
+Description=Sync SDDM login wallpaper to noctalia's current wallpaper
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/sddm-wallpaper-sync.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

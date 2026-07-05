@@ -90,10 +90,6 @@ SCALE_ENV=""
 $IS_HIDPI_LAPTOP && SCALE_ENV=",QT_SCALE_FACTOR=2"
 
 sudo tee /etc/sddm.conf > /dev/null <<EOF
-[Autologin]
-User=$(whoami)
-Session=hyprland-uwsm
-
 [General]
 InputMethod=qtvirtualkeyboard
 GreeterEnvironment=QML2_IMPORT_PATH=/usr/share/sddm/themes/silent/components/,QT_IM_MODULE=qtvirtualkeyboard${SCALE_ENV}
@@ -103,6 +99,15 @@ Current=silent
 EOF
 echo "    Written /etc/sddm.conf (QT_SCALE_FACTOR=2: $IS_HIDPI_LAPTOP)"
 $IS_HIDPI_LAPTOP || WARNINGS+=("sddm: if SDDM greeter appears too small, add QT_SCALE_FACTOR=2 to GreeterEnvironment in /etc/sddm.conf")
+
+# SDDM login wallpaper follows noctalia's current wallpaper. The silent theme's
+# default.conf already points background="wallpaper.png"; a root watcher service
+# overwrites that file whenever noctalia changes wallpaper (greeter runs as user
+# `sddm` and can't read $HOME, hence the copy into the theme dir).
+sudo ln -sf "$CONFIG/sddm/wallpaper-sync.sh" /usr/local/bin/sddm-wallpaper-sync.sh
+sudo ln -sf "$CONFIG/sddm/wallpaper-sync.service" /etc/systemd/system/sddm-wallpaper-sync.service
+sudo systemctl enable --now sddm-wallpaper-sync.service
+echo "    sddm wallpaper-sync → enabled (follows noctalia)"
 
 # ── Pacman hook ───────────────────────────────────────────────────────────────
 
