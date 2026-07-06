@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch ~/.claude/projects and auto-commit+push to GitHub
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/claude-git-watch.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
