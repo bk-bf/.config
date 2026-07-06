@@ -204,6 +204,19 @@ if [[ -n "$ZSH_BIN" && "$(getent passwd "$(whoami)" | cut -d: -f7)" != "$ZSH_BIN
     fi
 fi
 
+# ── Noctalia workspace mirror ─────────────────────────────────────────────────
+# Rebuilds ~/.config/quickshell/noctalia-shell (relabels the second monitor's
+# workspaces 11-19 as 1-9 in the bar). The mirror is gitignored (machine-specific
+# symlinks), so it must be regenerated from the tracked script on a fresh clone.
+
+if [[ -d /etc/xdg/quickshell/noctalia-shell ]]; then
+    echo ""
+    echo "==> Building Noctalia workspace mirror..."
+    "$CONFIG/noctalia/mirror-noctalia-shell.sh"
+else
+    WARNINGS+=("noctalia: noctalia-shell not installed — skipped workspace-number mirror")
+fi
+
 # ── Package tracker ───────────────────────────────────────────────────────────
 
 echo ""
