@@ -196,8 +196,8 @@ fi
 echo ""
 echo "==> Setting up zsh shell..."
 
-# Symlink .zshrc / .zshenv from the repo into $HOME (backup any pre-existing file)
-for f in .zshrc .zshenv; do
+# Symlink .zshrc / .zshenv / .bashrc from the repo into $HOME (backup any pre-existing file)
+for f in .zshrc .zshenv .bashrc; do
     if [[ -e "$HOME/$f" && ! -L "$HOME/$f" ]]; then
         mv "$HOME/$f" "$HOME/$f.pre-config.bak"
         echo "    backed up existing ~/$f → ~/$f.pre-config.bak"
