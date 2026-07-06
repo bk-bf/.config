@@ -116,16 +116,6 @@ echo "==> Creating system symlinks..."
 sudo mkdir -p /etc/pacman.d/hooks
 sudo ln -sf "$CONFIG/pkg-tracker.hook" /etc/pacman.d/hooks/pkg-tracker.hook
 
-# ── User bin shims ────────────────────────────────────────────────────────────
-# hyprflow derives its session-restore command from the window class ("zen"),
-# but the Zen binary is `zen-browser`. Symlink so `zen` resolves on ~/.local/bin
-# (on PATH) and hyprflow can relaunch it like every other app.
-if command -v zen-browser &>/dev/null; then
-    mkdir -p "$HOME/.local/bin"
-    ln -sfn "$(command -v zen-browser)" "$HOME/.local/bin/zen"
-    echo "    zen → symlinked to zen-browser (hyprflow restore)"
-fi
-
 # ── Limine ────────────────────────────────────────────────────────────────────
 # CachyOS Limine stack (replaces GRUB). limine-mkinitcpio-hook regenerates
 # $ESP/limine.conf on each kernel build; boot snapshots via limine-snapper-sync
@@ -194,6 +184,33 @@ systemctl --user enable --now pkg-tracker.timer
 systemctl --user enable --now polkit-agent.service
 systemctl --user enable --now theme-watch.service
 systemctl --user enable --now powerstat-logger.service
+
+# ── Session restore (hyprflow) ─────────────────────────────────────────────────
+# Autosave timer captures the window/workspace layout every 10 min; `hyprflow
+# restore` (exec-once in hyprland.conf) replays it on login.
+systemctl --user enable --now hyprflow-autosave.timer
+
+# Zen is optional: hyprflow records a window's class ("zen") as its relaunch
+# command, but the binary is `zen-browser`, so restore would exec a missing
+# `zen`. This per-app override fixes it. Default No — skip if you don't use Zen
+# (or have since moved to another browser).
+read -rp "    Wire up Zen for hyprflow session restore? [y/N] " _zen
+if [[ "$_zen" =~ ^[Yy]$ ]]; then
+    mkdir -p "$CONFIG/hyprflow"
+    if grep -q '^\[apps\.zen\]' "$CONFIG/hyprflow/config.toml" 2>/dev/null; then
+        echo "    zen → already in hyprflow/config.toml, skipping"
+    else
+        cat >> "$CONFIG/hyprflow/config.toml" <<'ZEN'
+# Zen's window class is "zen" but the binary is `zen-browser`; hyprflow captures
+# the class as the launch command, so restore would exec a nonexistent `zen`.
+[apps.zen]
+binary = "zen-browser"
+ZEN
+        echo "    zen → wired up for hyprflow session restore"
+    fi
+else
+    echo "    zen → skipped"
+fi
 
 # ── Shell (zsh + oh-my-zsh) ────────────────────────────────────────────────────
 
