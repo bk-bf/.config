@@ -9,6 +9,8 @@
 # symlink object and later remove it on branch switches / git restore.
 /nvim-tdl
 /nvim
+# Host-specific symlink → ~/.local/share/pkglist/hosts/<host>/pkglist.txt
+/pkglist.txt
 
 # App-generated junk at repo root (Qt file-dialog history, electron update cache)
 /QtProject.conf
@@ -255,3 +257,5 @@ opencode/bun.lock
 /kdeglobals
 /dolphinrc
 /mimeapps.list
+# Pamac window geometry (width/height) — rewritten on every resize, per-machine
+/pamac/config
