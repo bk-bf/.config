@@ -9,6 +9,8 @@
 # symlink object and later remove it on branch switches / git restore.
 /nvim-tdl
 /nvim
+# Host-specific symlink → ~/.local/share/pkglist/hosts/<host>/pkglist.txt
+/pkglist.txt
 
 # Whitelisted top-level directories
 !/.githooks/
@@ -250,3 +252,5 @@ opencode/bun.lock
 /dolphinrc
 /mimeapps.list
 /electron-builder.json
+# Pamac window geometry (width/height) — rewritten on every resize, per-machine
+/pamac/config
