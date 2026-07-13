@@ -1,0 +1,8 @@
+[Unit]
+Description=Push usage snapshot to dashboard aggregator (ubuntuserver)
+After=network-online.target collector.service
+
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/kirill/Documents/Projects/dashboard/push-usage.sh
