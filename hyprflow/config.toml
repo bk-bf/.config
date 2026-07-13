@@ -1,0 +1,18 @@
+# hyprflow session-restore tuning.
+#
+# By default hyprflow only records that a kitty window existed on a workspace —
+# it drops the working directory and what was running (cwd=None, command=None).
+# Enabling per-app capture makes `hyprflow restore` reopen each kitty on its
+# workspace *at the same directory*, with the last command rendered as a
+# ready-to-run comment hint. This is the "tmux session restore" behaviour with
+# zero terminal-feel cost: it's plain kitty relaunching, no multiplexer.
+#
+# cwd + last command are read from /proc at autosave time (systemd timer);
+# restore is already wired in hypr/hyprland.conf via `hyprflow restore`.
+# Docs: https://github.com/isorensen/hyprflow
+
+[apps.kitty]
+binary = "kitty"
+capture_cwd = true
+capture_last_command = true
+hint_template = "# Last: {last_command}\n# Dir: {cwd}"
