@@ -72,3 +72,18 @@ cld() {
     claude "$@"
 }
 alias tm="tmux"
+
+# ── abduco: persistent shell sessions — detach/reattach that survives closing
+# the terminal (the tmux feature that actually matters). abduco runs no terminal
+# emulator of its own, so kitty's scrollback/selection stay native. Caveat: the
+# live PROCESS survives a detach, but scrollback history does not carry across a
+# reattach — that would need a server-side buffer (the tmux layer). You must run
+# work INSIDE a session; a process launched normally can't be detached after.
+#   s [name]   create-or-reattach session <name> (default: main). Closing the
+#              window auto-detaches and leaves it running. Detach key: Ctrl-\
+#   sl         list running sessions
+# Install: sudo pacman -S abduco   (helpers stay inert until it's present)
+if command -v abduco >/dev/null 2>&1; then
+    s()  { abduco -A "${1:-main}" "${SHELL:-/usr/bin/zsh}"; }
+    sl() { abduco; }
+fi
