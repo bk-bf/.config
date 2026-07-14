@@ -48,7 +48,6 @@
 
   # Left prompt segments.
   typeset -g POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(
-    abduco                    # persistent-session indicator (prompt_abduco, below)
     # context                 # user@host
     dir                       # current directory
     vcs                       # git status
@@ -181,16 +180,6 @@
   # can slow down prompt by 1-2 milliseconds, so it's better to keep it turned off unless you
   # really need it.
   typeset -g POWERLEVEL9K_DISABLE_HOT_RELOAD=true
-
-  ##############################[ abduco: persistent-session indicator ]#########
-  # Shows "● <name>" when the shell runs inside an abduco session. The `s` helper
-  # in ~/.config/.aliases exports $ABDUCO_SESSION; the segment is hidden (returns
-  # early) otherwise. NOTE: `p10k configure` overwrites this file — if you rerun
-  # it, re-add both this block and `abduco` in POWERLEVEL9K_LEFT_PROMPT_ELEMENTS.
-  function prompt_abduco() {
-    [[ -n $ABDUCO_SESSION ]] || return
-    p10k segment -f 3 -t "● ${ABDUCO_SESSION}"   # 3 = yellow
-  }
 
   # If p10k is already loaded, reload configuration.
   # This works even with POWERLEVEL9K_DISABLE_HOT_RELOAD=true.
