@@ -82,6 +82,8 @@ alias tm="tmux"
 #   s <name>     directly create-or-reattach session <name>
 #   sl           plain list of running sessions
 #   detach:      Ctrl-\   (closing the window also detaches; the session lives on)
+#   prompt:      inside a session the shell exports $ABDUCO_SESSION, shown as a
+#                "● <name>" p10k indicator (prompt_abduco in ~/.config/.p10k.zsh)
 # Install: sudo pacman -S abduco fzf
 _abduco_names() { abduco 2>/dev/null | awk -F'\t' 'NR>1 {print $NF}'; }
 _abduco_kill() {  # end a session cleanly: kill the inner process subtree, then the server
@@ -102,8 +104,8 @@ _abduco_kill() {  # end a session cleanly: kill the inner process subtree, then 
 s() {
     emulate -L zsh
     command -v abduco >/dev/null 2>&1 || { print -u2 "s: abduco not installed — sudo pacman -S abduco"; return 1; }
-    if (( $# )); then abduco -A "$1" "${SHELL:-/usr/bin/zsh}"; return; fi
-    command -v fzf >/dev/null 2>&1 || { abduco -A main "${SHELL:-/usr/bin/zsh}"; return; }
+    if (( $# )); then abduco -A "$1" env ABDUCO_SESSION="$1" "${SHELL:-/usr/bin/zsh}"; return; fi
+    command -v fzf >/dev/null 2>&1 || { abduco -A main env ABDUCO_SESSION=main "${SHELL:-/usr/bin/zsh}"; return; }
     local out name; local -a lines
     while :; do
         out=$(_abduco_names | fzf --height=40% --reverse --border=rounded \
@@ -114,7 +116,7 @@ s() {
         name=${lines[3]:-${lines[1]}}
         [[ -z $name ]] && return 0
         if [[ ${lines[2]} == ctrl-x ]]; then _abduco_kill "$name"; continue; fi
-        abduco -A "$name" "${SHELL:-/usr/bin/zsh}"; return
+        abduco -A "$name" env ABDUCO_SESSION="$name" "${SHELL:-/usr/bin/zsh}"; return
     done
 }
 sl() { command -v abduco >/dev/null 2>&1 && abduco || print -u2 "sl: abduco not installed"; }
