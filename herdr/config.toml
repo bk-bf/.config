@@ -7,6 +7,7 @@ focus_pane_right = "ctrl+right"
 focus_pane_up = "ctrl+up"
 focus_pane_down = "ctrl+down"
 close_pane = "ctrl+q"
+new_tab = "ctrl+w"
 next_tab = "ctrl+tab"
 previous_tab = "ctrl+shift+tab"
 
