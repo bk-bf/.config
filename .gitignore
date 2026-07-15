@@ -57,6 +57,11 @@
 /.claude/*
 !/.claude/settings.json
 
+# Track only config.toml; the rest of herdr/ is sockets, logs and session state
+!/herdr/
+/herdr/*
+!/herdr/config.toml
+
 # Cache directories
 **/Cache/
 **/CachedData/
