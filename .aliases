@@ -72,6 +72,16 @@ alias op="opencode"
 # have — the laptop forwards de_DE.UTF-8 LC_* vars that aren't generated on the
 # remotes, so mosh-server otherwise falls back to US-ASCII and refuses to start.
 alias mosh='LC_ALL=C.UTF-8 command mosh'
+# `ssh ubuntu` / `ssh agent` transparently go through mosh (resilient across
+# lid-close/suspend). Any other host, or any ssh-only flag (-L/-J/-t/…), makes
+# $1 not match and falls back to real ssh. Add a host here once it gets
+# mosh-server installed.
+ssh() {
+    case "$1" in
+        ubuntu|agent) LC_ALL=C.UTF-8 command mosh "$@" ;;
+        *)            command ssh "$@" ;;
+    esac
+}
 # claude launcher: `cld -lg` splits kitty (claude left, lazygit right, same dir)
 cld() {
     if [[ "$1" == "-lg" ]]; then
