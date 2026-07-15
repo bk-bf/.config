@@ -2,6 +2,13 @@
 prefix = "ctrl+space"
 split_vertical = "ctrl+shift+v"
 split_horizontal = "ctrl+shift+h"
+focus_pane_left = "ctrl+left"
+focus_pane_right = "ctrl+right"
+focus_pane_up = "ctrl+up"
+focus_pane_down = "ctrl+down"
+close_pane = "ctrl+q"
+next_tab = "ctrl+tab"
+previous_tab = "ctrl+shift+tab"
 
 [ui]
 agent_panel_sort = "spaces"
