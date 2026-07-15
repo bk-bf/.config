@@ -10,11 +10,6 @@ map ctrl+c      copy_to_clipboard
 map ctrl+v      paste_from_clipboard
 map shift+insert        paste_from_clipboard
 
-# Free ctrl+shift+v (kitty's second paste) and ctrl+shift+h (scrollback popup)
-# so they pass through to herdr's split_vertical / split_horizontal bindings
-map ctrl+shift+v
-map ctrl+shift+h
-
 # cursor settings
 cursor_shape beam
 
