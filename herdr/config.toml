@@ -1,5 +1,7 @@
 [keys]
 prefix = "ctrl+space"
+split_vertical = "ctrl+shift+v"
+split_horizontal = "ctrl+shift+h"
 
 [ui]
 agent_panel_sort = "spaces"
