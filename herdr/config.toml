@@ -10,6 +10,8 @@ close_pane = "ctrl+q"
 new_tab = "ctrl+shift+w"
 next_tab = "ctrl+tab"
 previous_tab = "ctrl+shift+tab"
+next_workspace = "ctrl+shift+space"
+goto = "ctrl+f"
 
 [ui]
 agent_panel_sort = "spaces"
