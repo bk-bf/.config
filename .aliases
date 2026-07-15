@@ -57,6 +57,15 @@ alias s2test="echo 'Close lid now. Note time. Open lid after 1 hour and run: s2r
 alias ht="hustle_tracker"
 alias t="tmux"
 alias lg="lazygit"
+# herdr launcher: `h -s <name>` attaches to a named session; otherwise passthrough
+h() {
+    if [[ "$1" == "-s" ]]; then
+        shift
+        herdr session attach "$@"
+    else
+        herdr "$@"
+    fi
+}
 alias op="opencode"
 # claude launcher: `cld -lg` splits kitty (claude left, lazygit right, same dir)
 cld() {
@@ -71,4 +80,3 @@ cld() {
     fi
     claude "$@"
 }
-alias tm="tmux"
