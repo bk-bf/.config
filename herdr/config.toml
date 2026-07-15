@@ -2,14 +2,18 @@
 prefix = "ctrl+space"
 split_vertical = "ctrl+shift+v"
 split_horizontal = "ctrl+shift+h"
-focus_pane_left = "ctrl+left"
-focus_pane_right = "ctrl+right"
-focus_pane_up = "ctrl+up"
-focus_pane_down = "ctrl+down"
+focus_pane_left = "ctrl+shift+left"
+focus_pane_right = "ctrl+shift+right"
+focus_pane_up = "ctrl+shift+up"
+focus_pane_down = "ctrl+shift+down"
 close_pane = "ctrl+q"
-new_tab = "ctrl+w"
+new_tab = "ctrl+shift+w"
 next_tab = "ctrl+tab"
 previous_tab = "ctrl+shift+tab"
 
 [ui]
 agent_panel_sort = "spaces"
+
+[theme]
+name = "terminal"
+auto_switch = false
