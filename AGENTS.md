@@ -15,6 +15,17 @@ Personal Arch/CachyOS dotfiles for a Hyprland + Noctalia desktop. Configuration 
 - **Never run `hyprctl reload`** or restart services unless explicitly asked — this is a live desktop.
 - `install.sh` writes symlinks to `/etc` and `/usr/local/bin`. Don't run it unless asked.
 
+## Shell environment
+
+- **`ssh` is aliased to `mosh`** for the `ubuntu` and `agent` hosts (see the
+  `ssh()` function in `.aliases`). `ssh ubuntu` / `ssh agent` actually launch a
+  **mosh** session so remote work survives laptop lid-close/suspend. Any other
+  host, or any ssh-only flag (`-L`/`-J`/`-t`/…), falls back to real `ssh`.
+  Scripts, `git`, `scp`, `rsync -e ssh` use the ssh binary and are unaffected.
+  `mosh` itself is wrapped to force `LC_ALL=C.UTF-8` (the servers lack the
+  laptop's `de_DE.UTF-8` locales, else mosh-server bails to US-ASCII). Add a host
+  to the `case` list once it has `mosh-server`.
+
 ## Commit style
 
 Conventional commits. Match the log:
