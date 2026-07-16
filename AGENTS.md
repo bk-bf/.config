@@ -17,14 +17,16 @@ Personal Arch/CachyOS dotfiles for a Hyprland + Noctalia desktop. Configuration 
 
 ## Shell environment
 
-- **`ssh` is aliased to `mosh`** for the `ubuntu` and `agent` hosts (see the
-  `ssh()` function in `.aliases`). `ssh ubuntu` / `ssh agent` actually launch a
-  **mosh** session so remote work survives laptop lid-close/suspend. Any other
-  host, or any ssh-only flag (`-L`/`-J`/`-t`/…), falls back to real `ssh`.
-  Scripts, `git`, `scp`, `rsync -e ssh` use the ssh binary and are unaffected.
-  `mosh` itself is wrapped to force `LC_ALL=C.UTF-8` (the servers lack the
-  laptop's `de_DE.UTF-8` locales, else mosh-server bails to US-ASCII). Add a host
-  to the `case` list once it has `mosh-server`.
+- **Default to `mosh` for remote work** on `ubuntu`/`agent` (`mosh ubuntu`). It
+  survives laptop lid-close/suspend — roaming UDP keeps the session pinned, so
+  it resumes on wake. **Do not use plain `ssh` for remote sessions unless I
+  deliberately ask**, or unless the task genuinely needs something mosh can't do:
+  scrollback-heavy reading, port/agent forwarding (`-L`/`-J`), or file transfer
+  (`scp`/`rsync`). `ssh` is unaliased/plain. Trade-off to remember: mosh owns the
+  alt screen and has **no scrollback** (the mouse wheel walks shell history
+  instead of scrolling) — that's expected, reach for `ssh` when you need to read
+  back. `mosh` is wrapped in `.aliases` to force `LC_ALL=C.UTF-8` (servers lack
+  the laptop's `de_DE.UTF-8` locales, else mosh-server bails to US-ASCII).
 
 ## Commit style
 

@@ -67,21 +67,13 @@ h() {
     fi
 }
 alias op="opencode"
-# mosh survives lid-close/suspend (roaming UDP keeps the remote session pinned;
-# reopen the lid and it auto-resumes). Force a UTF-8 locale the servers actually
-# have — the laptop forwards de_DE.UTF-8 LC_* vars that aren't generated on the
-# remotes, so mosh-server otherwise falls back to US-ASCII and refuses to start.
+# Default to `mosh ubuntu`/`mosh agent` for remote work — it survives laptop
+# lid-close/suspend (roaming UDP keeps the session pinned; reopen and it resumes).
+# Force a UTF-8 locale the servers actually have: the laptop forwards
+# de_DE.UTF-8 LC_* vars that aren't generated on the remotes, else mosh-server
+# falls back to US-ASCII and refuses to start. Plain `ssh` is left untouched —
+# use it deliberately when you need scrollback, port-forwarding, or scp/rsync.
 alias mosh='LC_ALL=C.UTF-8 command mosh'
-# `ssh ubuntu` / `ssh agent` transparently go through mosh (resilient across
-# lid-close/suspend). Any other host, or any ssh-only flag (-L/-J/-t/…), makes
-# $1 not match and falls back to real ssh. Add a host here once it gets
-# mosh-server installed.
-ssh() {
-    case "$1" in
-        ubuntu|agent) LC_ALL=C.UTF-8 command mosh "$@" ;;
-        *)            command ssh "$@" ;;
-    esac
-}
 # claude launcher: `cld -lg` splits kitty (claude left, lazygit right, same dir)
 cld() {
     if [[ "$1" == "-lg" ]]; then
