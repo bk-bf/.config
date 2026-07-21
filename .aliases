@@ -109,3 +109,18 @@ cld() {
 # `z <kw>` jumps to your most-visited matching dir; `zi` opens an fzf picker of
 # recent dirs. Plain `cd` is left untouched — zoxide just learns from it.
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
+
+# znvim <keyword...> — open nvim in the best zoxide-matched dir (by frecency).
+# e.g. `znvim yact` -> nvim in ~/Documents/local/Projects/yact. No arg -> plain nvim.
+# Bumps the dir's frecency too, so editing a project reinforces its `z` ranking.
+znvim() {
+    [ $# -eq 0 ] && { nvim; return; }
+    local dir
+    dir=$(zoxide query -- "$@" 2>/dev/null)
+    if [ -z "$dir" ]; then
+        echo "znvim: no zoxide match for '$*'" >&2
+        return 1
+    fi
+    zoxide add "$dir"
+    nvim "$dir"
+}
