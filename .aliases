@@ -48,6 +48,13 @@ alias pkgpull='git -C ~/.local/share/pkglist pull'
 alias pkglog='git -C ~/.local/share/pkglist log --oneline -10'
 alias pkgst='git -C ~/.local/share/pkglist status --short'
 
+# osync (Documents/remote <-> ubuntuserver) — dashboard + run helpers
+alias osd='~/.config/scripts/osync-dash'                 # status/health dashboard
+alias osw='~/.config/scripts/osync-dash --watch'         # live-refresh dashboard
+alias oscheck='~/.config/scripts/osync-dash --check'     # dashboard + pending dry-run
+alias ossync='~/.config/scripts/osync-dash --sync'       # run the sync, then show status
+alias oslog='~/.config/scripts/osync-dash --log'         # page the osync log
+
 # S2idle optimization monitoring
 alias s2check="systemctl status s2idle-optimize.service --no-pager"
 alias s2residency="sudo cat /sys/kernel/debug/pmc_core/slp_s0_residency_usec"
