@@ -48,6 +48,9 @@ alias pkgpull='git -C ~/.local/share/pkglist pull'
 alias pkglog='git -C ~/.local/share/pkglist log --oneline -10'
 alias pkgst='git -C ~/.local/share/pkglist status --short'
 
+# osync sync dashboard (github.com/bk-bf/osync-dash, on PATH via ~/.local/bin)
+alias osd='osync-dash'
+
 # S2idle optimization monitoring
 alias s2check="systemctl status s2idle-optimize.service --no-pager"
 alias s2residency="sudo cat /sys/kernel/debug/pmc_core/slp_s0_residency_usec"
