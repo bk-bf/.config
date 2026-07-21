@@ -40,7 +40,6 @@
 !/noctalia/
 # nvim/ — now lives in tdl repo, symlinked from ~/.config/nvim
 !/nvim-treemux/
-!/osync/
 !/pamac/
 !/qt6ct/
 !/s2idle/
