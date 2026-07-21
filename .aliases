@@ -104,3 +104,8 @@ cld() {
     fi
     claude "$@"
 }
+
+# zoxide — smart cd with frecency ranking (must init after oh-my-zsh loads).
+# `z <kw>` jumps to your most-visited matching dir; `zi` opens an fzf picker of
+# recent dirs. Plain `cd` is left untouched — zoxide just learns from it.
+command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
