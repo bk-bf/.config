@@ -12,7 +12,6 @@ _td_alert() {
 td() {
     termdown "$@" && _td_alert
 }
-wlc() { wl-copy < "$1"; }
 # copy <file> -> put its contents on the clipboard; no arg -> copy piped stdin
 copy() {
     if [[ -n "$1" ]]; then
