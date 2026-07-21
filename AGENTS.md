@@ -17,7 +17,7 @@ Personal Arch/CachyOS dotfiles for a Hyprland + Noctalia desktop. Configuration 
 
 ## Shell environment
 
-- **Default to `mosh` for remote work** on `ubuntu`/`agent` (`mosh ubuntu`). It
+- **Default to `mosh` for remote work** on `ubuntu` (`mosh ubuntu`). It
   survives laptop lid-close/suspend — roaming UDP keeps the session pinned, so
   it resumes on wake. **Do not use plain `ssh` for remote sessions unless I
   deliberately ask**, or unless the task genuinely needs something mosh can't do:
