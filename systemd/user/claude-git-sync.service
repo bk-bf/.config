@@ -1,7 +1,0 @@
-[Unit]
-Description=Auto-sync ~/.claude/projects with GitHub (commit/pull/push)
-After=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/claude-git-sync.sh
