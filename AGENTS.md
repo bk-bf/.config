@@ -2,6 +2,10 @@
 
 Instructions for AI agents (OpenCode, etc.) working in this repository.
 
+## Working style (all projects)
+
+- **No narration leakage into the product.** A deliverable — slides, docs, README, code comments, commit/PR text, UI copy — must only ever be about its subject, never about how or why you built it. Do not write "plain words first, code names pinned alongside", "this deck reads the code not the notes", "as requested, here is…", "I chose to structure it this way", or reading instructions for your own artifact. The construction of a thing and the content of a thing are two different layers; keep the construction layer in chat with me, out of the artifact. **Litmus test before you write anything into a deliverable: would a human doing this job actually put that sentence there?** A human designer never narrates their own technique onto the slide. If the answer is no, cut it.
+
 ## What this repo is
 
 Personal Arch/CachyOS dotfiles for a Hyprland + Noctalia desktop. Configuration only — no build system, no tests. Changes here affect a live system.
