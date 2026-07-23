@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""ccr — pick any Claude Code session from anywhere and resume it in its own directory.
+
+  ccr              browse every session, newest first
+  ccr <term>       open the picker with a starting query
+  ccr -l           print the index, no picker
+  ccr -- <args>    extra args forwarded to `claude`
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+PROJECTS = Path.home() / ".claude" / "projects"
+CACHE = Path.home() / ".cache" / "ccr-index.json"
+HEAD_LINES = 400
+TAIL_BYTES = 128 * 1024
+
+DIM = "\033[2m"
+CYAN = "\033[36m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+BOLD = "\033[1m"
+OFF = "\033[0m"
+
+NOISE = re.compile(r"<system-reminder>.*?</system-reminder>|</?(?:local-)?command-[a-z-]+>", re.S)
+
+
+def text_of(msg):
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                return block.get("text", "")
+    return ""
+
+
+def clean(s):
+    s = NOISE.sub(" ", s or "")
+    return " ".join(s.split())[:400]
+
+
+def useful(s):
+    if not s or len(s) < 2:
+        return False
+    return not s.startswith(("Caveat:", "[Request interrupted", "API Error"))
+
+
+def scan(path):
+    """Read the head and tail of a session file — never the whole thing."""
+    rec = {"id": path.stem, "cwd": "", "branch": "", "title": "", "first": "", "last": "", "ts": 0.0}
+
+    with path.open("rb") as fh:
+        for i, raw in enumerate(fh):
+            if i >= HEAD_LINES:
+                break
+            try:
+                d = json.loads(raw)
+            except ValueError:
+                continue
+            if d.get("type") == "ai-title" and not rec["title"]:
+                rec["title"] = clean(d["aiTitle"])
+            if not rec["cwd"] and d.get("cwd"):
+                rec["cwd"] = d["cwd"]
+                rec["branch"] = d.get("gitBranch") or ""
+            if d.get("type") == "user" and not d.get("isSidechain") and not rec["first"]:
+                t = clean(text_of(d.get("message", {})))
+                if useful(t):
+                    rec["first"] = t
+
+        size = path.stat().st_size
+        fh.seek(max(0, size - TAIL_BYTES))
+        tail = fh.read().split(b"\n")
+        if size > TAIL_BYTES:
+            tail = tail[1:]
+
+    for raw in tail:
+        if not raw.strip():
+            continue
+        try:
+            d = json.loads(raw)
+        except ValueError:
+            continue
+        if d.get("type") == "last-prompt":
+            t = clean(d.get("lastPrompt", ""))
+            if useful(t):
+                rec["last"] = t
+        elif d.get("type") == "user" and not d.get("isSidechain"):
+            t = clean(text_of(d.get("message", {})))
+            if useful(t):
+                rec["last"] = t
+        if not rec["cwd"] and d.get("cwd"):
+            rec["cwd"] = d["cwd"]
+            rec["branch"] = d.get("gitBranch") or ""
+
+    rec["ts"] = path.stat().st_mtime
+    return rec
+
+
+def index():
+    try:
+        cache = json.loads(CACHE.read_text())
+    except (OSError, ValueError):
+        cache = {}
+
+    fresh, records = {}, []
+    for path in PROJECTS.glob("*/*.jsonl"):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        key = str(path)
+        stamp = f"{st.st_mtime_ns}:{st.st_size}"
+        hit = cache.get(key)
+        if hit and hit.get("stamp") == stamp:
+            rec = hit
+        else:
+            try:
+                rec = scan(path)
+            except OSError:
+                continue
+            rec["stamp"] = stamp
+        fresh[key] = rec
+        if rec["first"] or rec["last"] or rec["title"]:
+            records.append(rec)
+
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE.write_text(json.dumps(fresh))
+    records.sort(key=lambda r: r["ts"], reverse=True)
+    return records
+
+
+def ago(ts):
+    d = time.time() - ts
+    for cut, div, unit in ((60, 1, "s"), (3600, 60, "m"), (86400, 3600, "h"), (604800, 86400, "d")):
+        if d < cut:
+            return f"{int(d / div)}{unit}"
+    return time.strftime("%d %b", time.localtime(ts))
+
+
+def line(rec):
+    label = rec["title"] or rec["last"] or rec["first"]
+    home = str(Path.home())
+    cwd = rec["cwd"].replace(home, "~", 1) if rec["cwd"] else "?"
+    gone = "" if os.path.isdir(rec["cwd"]) else f" {RED}⚠{OFF}"
+    branch = f" {DIM}({rec['branch']}){OFF}" if rec["branch"] else ""
+    return f"{YELLOW}{ago(rec['ts']):>6}{OFF}  {label[:80]:<80}  {CYAN}{cwd}{OFF}{branch}{gone}"
+
+
+def preview(rec):
+    home = str(Path.home())
+    out = [f"{BOLD}{rec['title'] or '(untitled)'}{OFF}", ""]
+    out.append(f"{DIM}dir   {OFF} {rec['cwd'].replace(home, '~', 1)}")
+    if not os.path.isdir(rec["cwd"]):
+        out.append(f"{RED}       directory no longer exists{OFF}")
+    if rec["branch"]:
+        out.append(f"{DIM}branch{OFF} {rec['branch']}")
+    out.append(f"{DIM}id    {OFF} {rec['id']}")
+    out.append(f"{DIM}when  {OFF} {time.strftime('%a %d %b %H:%M', time.localtime(rec['ts']))}")
+    if rec["first"]:
+        out += ["", f"{DIM}── opened with ──{OFF}", rec["first"]]
+    if rec["last"] and rec["last"] != rec["first"]:
+        out += ["", f"{DIM}── last prompt ──{OFF}", rec["last"]]
+    return "\n".join(out)
+
+
+def main():
+    argv = sys.argv[1:]
+    passthru = []
+    if "--" in argv:
+        cut = argv.index("--")
+        argv, passthru = argv[:cut], argv[cut + 1:]
+
+    records = index()
+    if not records:
+        sys.exit("ccr: no sessions found under ~/.claude/projects")
+
+    if argv and argv[0] in ("-l", "--list"):
+        for rec in records:
+            print(line(rec))
+        return
+
+    if argv and argv[0] == "--preview":
+        by_id = {r["id"]: r for r in records}
+        rec = by_id.get(argv[1])
+        print(preview(rec) if rec else "")
+        return
+
+    query = " ".join(argv)
+    feed = "".join(f"{r['id']}\t{line(r)}\n" for r in records)
+    fzf = subprocess.run(
+        ["fzf", "--ansi", "--delimiter=\t", "--with-nth=2..", "--nth=2..",
+         "--height=90%", "--reverse", "--no-sort",
+         "--prompt=session ❯ ", "--header=enter resume · ctrl-c cancel",
+         "--preview", f"{sys.argv[0]} --preview {{1}}",
+         "--preview-window=right,45%,wrap", "--query", query],
+        input=feed, text=True, capture_output=True,
+    )
+    if fzf.returncode != 0 or not fzf.stdout.strip():
+        return
+
+    chosen = fzf.stdout.split("\t")[0]
+    rec = next(r for r in records if r["id"] == chosen)
+
+    if not rec["cwd"]:
+        sys.exit("ccr: this session recorded no working directory")
+    if not os.path.isdir(rec["cwd"]):
+        sys.exit(
+            f"ccr: {rec['cwd']} no longer exists.\n"
+            f"     Claude Code keys sessions by directory, so recreate it to resume:\n"
+            f"     mkdir -p {rec['cwd']!r} && ccr"
+        )
+
+    os.chdir(rec["cwd"])
+    print(f"{DIM}→ {rec['cwd']}{OFF}", file=sys.stderr)
+    os.execvp("claude", ["claude", "--resume", rec["id"], *passthru])
+
+
+if __name__ == "__main__":
+    main()
