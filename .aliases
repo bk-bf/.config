@@ -154,12 +154,30 @@ yay() {
     _pacdim_run yay "$@"
 }
 
-# pac — sudo pacman with the same treatment (the yay function can't catch
-# `sudo pacman`, since sudo resolves the binary itself).
-pac() {
+# Plain `pacman` — queries like -Q, -Ss, -Si.
+pacman() {
     if [ ! -t 1 ] || [ -n "$NO_PACDIM" ] || ! command -v pacdim >/dev/null 2>&1; then
-        sudo pacman "$@"
+        command pacman "$@"
         return
     fi
-    _pacdim_run sudo pacman "$@"
+    _pacdim_run pacman "$@"
+}
+
+# `sudo pacman` can't be caught by the pacman function above — sudo resolves
+# the binary itself, so the shell never sees a `pacman` word to expand. Hence
+# this narrow sudo wrapper: it only intervenes when the very first argument is
+# literally `pacman`, and hands every other sudo invocation straight through
+# untouched (including `sudo -u`, `sudo -i`, `sudo -S pacman`, etc).
+sudo() {
+    if [ "$1" = pacman ] && [ -t 1 ] && [ -z "$NO_PACDIM" ] \
+       && command -v pacdim >/dev/null 2>&1; then
+        _pacdim_run sudo "$@"
+        return
+    fi
+    command sudo "$@"
+}
+
+# pac — shorthand for `sudo pacman`.
+pac() {
+    sudo pacman "$@"
 }

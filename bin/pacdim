@@ -29,7 +29,8 @@ VER = "\033[38;5;150m"  # version numbers
 SIZE = "\033[1;38;5;223m"  # download / install sizes
 ASK = "\033[1;38;5;215m"  # anything waiting on you
 WARN = "\033[38;5;179m"  # real warnings
-ERR = "\033[1;38;5;203m"  # errors and failures
+SOFT = "\033[38;5;131m"  # errors that did not cost you the transaction
+ERR = "\033[1;38;5;203m"  # the upgrade did not happen — act on this
 
 SGR = re.compile(r"\033\[[0-9;]*m")
 
@@ -57,6 +58,20 @@ NOISE = re.compile(
 # Permission-diff warnings are pure noise; every other warning is real.
 PERM_WARN = re.compile(r"^warning: directory permissions differ")
 
+# Errors that look alarming but left the packages installed and working.
+# This list is deliberately short and specific: an error is only quietened
+# when it is known to be cosmetic, and everything unrecognised stays loud.
+# Being wrong in that direction costs a glance; being wrong the other way
+# hides a broken upgrade behind a colour that says "ignore me".
+COSMETIC_ERR = re.compile(
+    r"""(?:
+          error\ updating\ package\ install\ reason   # yay bookkeeping, post-install
+        | is\ up\ to\ date\ --\ skipping
+        | ^\s*sudo:\ (?:timed\ out\ reading\ password|a\ password\ is\ required)$
+        )""",
+    re.X,
+)
+
 
 def paint(line: str) -> str:
     """Return `line` wrapped in SGR codes. Never alters the characters."""
@@ -66,7 +81,10 @@ def paint(line: str) -> str:
     if not s:
         return line
 
-    # --- things that stop the world -------------------------------------
+    # --- errors, ranked by whether the upgrade actually happened ---------
+    # Known-cosmetic first, so it wins over the generic "error:" match below.
+    if COSMETIC_ERR.search(plain) or COSMETIC_ERR.search(s):
+        return SOFT + plain + R
     if s.startswith(("error:", "==> ERROR:", "sudo:")) or " -> error" in plain:
         return ERR + plain + R
     if s.startswith("Errors occurred") or "failure occurred" in s or s == "Aborting...":
