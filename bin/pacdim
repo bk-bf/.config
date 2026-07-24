@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+# pacdim — recolour pacman/yay output by importance.
+#
+# Reads pacman/yay output on stdin, writes it back verbatim on stdout with
+# nothing but the colours changed. Routine chatter (hooks, snapper, integrity
+# checks, progress bars) is dimmed; package names, sizes, prompts, warnings and
+# errors stay bright.
+#
+# Usage:
+#   yay -Syu 2>&1 | pacdim
+#   pacdim --demo            print a sample transcript, recoloured
+#   NO_PACDIM=1              bypass (passthrough, no recolouring)
+#
+# The `yay` and `pac` shell functions in ~/.config/.aliases wire this up so a
+# normal `yay -Syu` goes through it automatically.
+
+import os
+import re
+import select
+import sys
+
+# ---------------------------------------------------------------- palette ---
+R = "\033[0m"
+DIM = "\033[38;5;242m"  # routine chatter — present but out of the way
+BODY = "\033[38;5;250m"  # ordinary readable text
+HDR = "\033[1;38;5;252m"  # section headers
+PKG = "\033[1;38;5;117m"  # package names
+VER = "\033[38;5;150m"  # version numbers
+SIZE = "\033[1;38;5;223m"  # download / install sizes
+ASK = "\033[1;38;5;215m"  # anything waiting on you
+WARN = "\033[38;5;179m"  # real warnings
+ERR = "\033[1;38;5;203m"  # errors and failures
+
+SGR = re.compile(r"\033\[[0-9;]*m")
+
+# Transaction verbs: these lines are the actual work, everything else that
+# looks like "(n/m) ..." is a hook and gets dimmed.
+TXN = r"(?:installing|upgrading|removing|reinstalling|downgrading)"
+
+# Chatter that carries no decision value.
+NOISE = re.compile(
+    r"""^(?:
+          \s*::\s*(?:Retrieving\ packages|Checking\ keys\ in\ keyring
+                    |Checking\ package\ integrity|Loading\ package\ files
+                    |Checking\ for\ file\ conflicts|Checking\ available\ disk\ space
+                    |Processing\ package\ changes|Running\ post-transaction\ hooks
+                    |Searching\ (?:AUR|databases)\ for\ updates)
+        | \s*(?:resolving\ dependencies|looking\ for\ conflicting\ packages)
+        | ==>\s*(?:root|Retrieving\ sources)
+        | ==>\s*NOTE:
+        | \s+->\s+(?:Cloning|Found|Downloading|Updating)
+        | \s*filesystem:\s*\d+\s+package:\s*\d+
+        )""",
+    re.X,
+)
+
+# Permission-diff warnings are pure noise; every other warning is real.
+PERM_WARN = re.compile(r"^warning: directory permissions differ")
+
+
+def paint(line: str) -> str:
+    """Return `line` wrapped in SGR codes. Never alters the characters."""
+    plain = SGR.sub("", line)
+    s = plain.strip()
+
+    if not s:
+        return line
+
+    # --- things that stop the world -------------------------------------
+    if s.startswith(("error:", "==> ERROR:", "sudo:")) or " -> error" in plain:
+        return ERR + plain + R
+    if s.startswith("Errors occurred") or "failure occurred" in s or s == "Aborting...":
+        return ERR + plain + R
+    if re.match(r"^\S+: /\S+ exists in filesystem", s):
+        return ERR + plain + R
+
+    # --- things waiting on you ------------------------------------------
+    if "[sudo] password" in plain or re.search(r"\[Y/n\]|\[y/N\]|\[N/y\]", plain):
+        return ASK + plain + R
+
+    # --- warnings: perm-diff is noise, the rest matter -------------------
+    if PERM_WARN.match(s):
+        return DIM + plain + R
+    if s.startswith("warning:"):
+        return WARN + plain + R
+
+    # --- the transaction itself: (n/m) upgrading <pkg> [====] 100% -------
+    m = re.match(r"^(\(\d+/\d+\)\s+" + TXN + r"\s+)(\S+)(\s*)(.*)$", plain)
+    if m:
+        head, pkg, gap, tail = m.groups()
+        return f"{DIM}{head}{R}{PKG}{pkg}{R}{gap}{DIM}{tail}{R}"
+
+    # --- AUR build: which package is building now ------------------------
+    m = re.match(r"^(==>\s*Making package:\s*)(\S+)(\s*)(.*)$", plain)
+    if m:
+        head, pkg, gap, tail = m.groups()
+        return f"{DIM}{head}{R}{PKG}{pkg}{R}{gap}{DIM}{tail}{R}"
+
+    # --- the summary block: sizes and the package list -------------------
+    if re.match(r"^(?:Total (?:Download|Installed) Size|Net Upgrade Size)", s):
+        return re.sub(
+            r"^([^:]+:\s*)(.*)$", lambda g: HDR + g.group(1) + R + SIZE + g.group(2) + R, plain
+        )
+    if re.match(r"^Packages?\s*\(\d+\)", s):
+        # "Packages (3) foo-1.2-1  bar-3.4-5" — colour each name-version pair.
+        head, _, rest = plain.partition(")")
+        return (
+            HDR
+            + head
+            + ")"
+            + R
+            + re.sub(
+                r"(\S+?)(-[0-9][^\s-]*(?:-\d+)?)(?=\s|$)",
+                lambda g: PKG + g.group(1) + R + VER + g.group(2) + R,
+                rest,
+            )
+        )
+
+    # --- search hits: "extra/ripgrep 15.2.0-1 (1.4 MiB) (Installed)" -----
+    # Anchored to a leading repo/ segment so file paths in other messages
+    # ("/usr/bin/rg exists in filesystem") can't match.
+    m = re.match(r"^([a-z][\w.+-]*/)([^\s/]+)(\s+)(\S+)(\s*)(.*)$", plain)
+    if m:
+        repo, pkg, g1, ver, g2, tail = m.groups()
+        return f"{DIM}{repo}{R}{PKG}{pkg}{R}{g1}{VER}{ver}{R}{g2}{DIM}{tail}{R}"
+
+    # --- everything routine ---------------------------------------------
+    if NOISE.match(plain) or re.match(r"^\(\d+/\d+\)", s):
+        return DIM + plain + R
+    if re.match(r"^\S+ is up to date$", s) or re.search(r"\[[-#]+\]\s*\d+%", plain):
+        return DIM + plain + R
+
+    if s.startswith("::"):
+        return HDR + plain + R
+    if s.startswith("==>"):
+        return BODY + plain + R
+
+    return BODY + plain + R
+
+
+def run(src, dst):
+    """Stream src -> dst, recolouring whole lines, flushing partials on idle.
+
+    Partial flushing is what keeps prompts usable: pacman writes
+    ":: Proceed with installation? [Y/n]" with no trailing newline, so a
+    line-buffered filter would swallow it until after you'd already answered.
+    """
+    buf = b""
+    mid_line = False  # a partial for this line already went out uncoloured
+
+    while True:
+        ready, _, _ = select.select([src], [], [], 0.05)
+        if ready:
+            try:
+                chunk = os.read(src, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk
+            while True:
+                m = re.search(rb"[\r\n]", buf)
+                if not m:
+                    break
+                line, sep = buf[: m.start()], buf[m.start() : m.start() + 1]
+                buf = buf[m.start() + 1 :]
+                text = line.decode("utf-8", "replace")
+                out = text if mid_line else paint(text)
+                dst.write((out + sep.decode()).encode())
+                mid_line = False
+            dst.flush()
+        elif buf:
+            # Idle with an unterminated line: it is a prompt. Show it now.
+            text = buf.decode("utf-8", "replace")
+            dst.write((text if mid_line else paint(text)).encode())
+            dst.flush()
+            buf = b""
+            mid_line = True
+
+    if buf:
+        text = buf.decode("utf-8", "replace")
+        dst.write((text if mid_line else paint(text)).encode())
+    dst.flush()
+
+
+def main():
+    if "--demo" in sys.argv:
+        # realpath, not abspath: pacdim is reached through a symlink in
+        # ~/.local/bin and the sample lives beside the real file.
+        here = os.path.dirname(os.path.realpath(__file__))
+        sample = os.path.join(here, "pacdim-sample.txt")
+        if not os.path.exists(sample):
+            sys.exit("no sample transcript installed next to pacdim")
+        with open(sample) as fh:
+            for line in fh:
+                print(paint(line.rstrip("\n")))
+        return
+
+    if os.environ.get("NO_PACDIM"):
+        while chunk := os.read(0, 65536):
+            sys.stdout.buffer.write(chunk)
+            sys.stdout.buffer.flush()
+        return
+
+    try:
+        run(0, sys.stdout.buffer)
+    except (KeyboardInterrupt, BrokenPipeError):
+        # Downstream went away (`yay -Ss foo | head`) or Ctrl-C. Neither is
+        # ours to report — die quietly instead of dumping a traceback over
+        # whatever pacman was saying.
+        try:
+            sys.stdout.close()
+        except BrokenPipeError:
+            pass
+        os._exit(0)
+
+
+if __name__ == "__main__":
+    main()

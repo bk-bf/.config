@@ -121,3 +121,45 @@ znvim() {
     zoxide add "$dir"
     nvim "$dir"
 }
+
+# --- package output, recoloured by importance ------------------------------
+# Routine chatter (hook steps, snapper snapshots, integrity checks, progress
+# bars) is dimmed to grey; package names, sizes, prompts, warnings and errors
+# stay bright. Nothing is reworded, reordered or hidden — only the colour
+# changes, so yay still looks and behaves exactly like yay. `script` keeps a
+# pty attached so pacman renders at full width and prompts still work.
+# Bypass with NO_PACDIM=1, or by piping (a non-tty stdout skips the filter).
+# Preview the colouring without installing anything: pacdim --demo
+# $pipestatus is only readable on the line immediately after the pipeline —
+# any command in between (even `[`) overwrites it — so the shell branch is
+# picked up front rather than around the assignment.
+_pacdim_run() {
+    local cmd rc
+    cmd=$(printf '%q ' "$@")
+    if [ -n "$ZSH_VERSION" ]; then
+        script -qefc "$cmd" /dev/null | pacdim
+        rc=${pipestatus[1]}
+    else
+        script -qefc "$cmd" /dev/null | pacdim
+        rc=${PIPESTATUS[0]}
+    fi
+    return $rc
+}
+
+yay() {
+    if [ ! -t 1 ] || [ -n "$NO_PACDIM" ] || ! command -v pacdim >/dev/null 2>&1; then
+        command yay "$@"
+        return
+    fi
+    _pacdim_run yay "$@"
+}
+
+# pac — sudo pacman with the same treatment (the yay function can't catch
+# `sudo pacman`, since sudo resolves the binary itself).
+pac() {
+    if [ ! -t 1 ] || [ -n "$NO_PACDIM" ] || ! command -v pacdim >/dev/null 2>&1; then
+        sudo pacman "$@"
+        return
+    fi
+    _pacdim_run sudo pacman "$@"
+}
