@@ -168,6 +168,17 @@ pacman() {
 # this narrow sudo wrapper: it only intervenes when the very first argument is
 # literally `pacman`, and hands every other sudo invocation straight through
 # untouched (including `sudo -u`, `sudo -i`, `sudo -S pacman`, etc).
+#
+# oh-my-zsh's correction.zsh sets `alias sudo='nocorrect sudo'`, and zsh will
+# not define a function whose name an alias already claims ("defining function
+# based on alias" -> parse error). Stash the alias, define the function, then
+# put it back verbatim: it re-expands onto the function rather than the binary,
+# so `nocorrect` keeps working.
+if [ -n "$ZSH_VERSION" ]; then
+    _pacdim_sudo_alias=$(alias sudo 2>/dev/null)
+    unalias sudo 2>/dev/null
+fi
+
 sudo() {
     if [ "$1" = pacman ] && [ -t 1 ] && [ -z "$NO_PACDIM" ] \
        && command -v pacdim >/dev/null 2>&1; then
@@ -176,6 +187,11 @@ sudo() {
     fi
     command sudo "$@"
 }
+
+if [ -n "$ZSH_VERSION" ] && [ -n "$_pacdim_sudo_alias" ]; then
+    eval "alias $_pacdim_sudo_alias"
+fi
+unset _pacdim_sudo_alias
 
 # pac — shorthand for `sudo pacman`.
 pac() {
