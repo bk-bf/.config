@@ -1,3 +1,4 @@
+onboarding = false
 [keys]
 prefix = "ctrl+space"
 split_vertical = "ctrl+shift+v"
@@ -18,7 +19,7 @@ agent_panel_sort = "spaces"
 
 show_agent_labels_on_pane_borders = false
 [theme]
-name = "terminal"
+name = "tokyo-night"
 auto_switch = false
 
 [experimental]
