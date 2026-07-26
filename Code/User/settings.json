@@ -69,6 +69,9 @@
   "terminal.integrated.fontSize": 14,
   "terminal.integrated.lineHeight": 1.6,
   "workbench.editor.splitInGroupLayout": "vertical",
+  "workbench.editor.enablePreview": false,
+  "workbench.editor.enablePreviewFromQuickOpen": false,
+  "workbench.editor.enablePreviewFromCodeNavigation": false,
   "workbench.editor.limit.enabled": true,
   "workbench.editor.limit.value": 10,
   "workbench.editor.limit.perEditorGroup": true,
@@ -190,7 +193,12 @@
   "chat.restoreLastPanelSession": true,
   "chat.viewProgressBadge.enabled": true,
   "chat.tools.autoApprove": true,
-  "workbench.settings.applyToAllProfiles": ["chat.viewSessions.orientation"],
+  "workbench.settings.applyToAllProfiles": [
+    "chat.viewSessions.orientation",
+    "workbench.editor.enablePreview",
+    "workbench.editor.enablePreviewFromQuickOpen",
+    "workbench.editor.enablePreviewFromCodeNavigation",
+  ],
   "[typescript]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",
   },
@@ -224,4 +232,6 @@
   "ai-commit.OPENAI_BASE_URL": "https://api.moonshot.ai/v1",
   "ai-commit.OPENAI_API_TYPE": "completion",
   "ai-commit.OPENAI_TEMPERATURE": 0.3,
+  "editor.definitionLinkOpensInPeek": true,
+  "window.openFilesInNewWindow": "on",
 }
