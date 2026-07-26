@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily noctalia fork sync
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
