@@ -5,7 +5,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/kirill/Documents/Projects/codegraph
+WorkingDirectory=/home/kirill/Documents/local/Projects/codegraph
 Environment=CI=true
 # Low priority so it always yields CPU to whatever you're profiling. The viewer
 # is idle most of the time; this only matters during an on-demand rebuild.

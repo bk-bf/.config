@@ -5,4 +5,9 @@ After=network-online.target collector.service
 [Service]
 Type=oneshot
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/kirill/Documents/Projects/dashboard/push-usage.sh
+# Points at a stable symlink in ~/.local/bin, not into the repo. The dashboard/
+# dir has moved twice (Documents/Projects -> Documents/local/Projects) and each
+# time the hardcoded path here rotted silently. Now a move only needs:
+#   ln -sfn <new path>/push-usage.sh ~/.local/bin/push-usage
+# and this unit never has to change (no edit, no daemon-reload).
+ExecStart=%h/.local/bin/push-usage
