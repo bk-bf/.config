@@ -1,0 +1,10 @@
+[Unit]
+Description=osd periodic sync timer — documents_remote
+
+[Timer]
+OnActiveSec=5min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
