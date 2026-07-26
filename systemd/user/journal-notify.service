@@ -1,0 +1,23 @@
+[Unit]
+Description=Surface journal failures as noctalia notifications
+# Needs the notification daemon (noctalia/quickshell) to be up, and dies with
+# the session rather than lingering across a compositor restart.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/home/kirill/.config/hypr/scripts/journal-notify.sh
+Restart=on-failure
+RestartSec=10
+
+# This is a watchdog, not a workload. It must never become the thing it warns
+# about — hence a hard memory ceiling and a high OOM score so the kernel reaps
+# it before anything that matters.
+OOMScoreAdjust=500
+MemoryMax=64M
+CPUWeight=10
+Nice=10
+
+[Install]
+WantedBy=graphical-session.target
