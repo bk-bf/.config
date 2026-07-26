@@ -289,7 +289,7 @@
                     "hideWhenZeroUnread": false,
                     "iconColor": "none",
                     "id": "NotificationHistory",
-                    "showUnreadBadge": false,
+                    "showUnreadBadge": true,
                     "unreadBadgeColor": "primary"
                 }
             ]
