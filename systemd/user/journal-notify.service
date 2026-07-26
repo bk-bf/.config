@@ -12,10 +12,20 @@ Restart=on-failure
 RestartSec=10
 
 # This is a watchdog, not a workload. It must never become the thing it warns
-# about — hence a hard memory ceiling and a high OOM score so the kernel reaps
-# it before anything that matters.
-OOMScoreAdjust=500
-MemoryMax=64M
+# about — hence the hard memory ceiling, which is what actually guarantees that:
+# it cannot grow into the hog no matter what happens upstream.
+#
+# OOMScoreAdjust is deliberately 0, not raised. A positive score made this the
+# kernel's *preferred* victim under global pressure — i.e. it was reliably killed
+# first, during precisely the event it exists to report, and came back 10s later
+# with "--since now" past the kernel's log line. The ceiling already covers the
+# runaway-watchdog worry; volunteering to die first only cost us the alert.
+# (Below 0 is unavailable anyway: negative adjustments need CAP_SYS_RESOURCE.)
+#
+# 64M was too tight — peak sat exactly at the ceiling, with cgroup "max" events
+# to match, so journalctl+jq were being reclaim-throttled to stay under it.
+OOMScoreAdjust=0
+MemoryMax=128M
 CPUWeight=10
 Nice=10
 
