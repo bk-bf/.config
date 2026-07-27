@@ -1,0 +1,16 @@
+[Unit]
+Description=Watch the Noctalia shell for package updates that touch forked files
+
+[Path]
+# inotify, not polling: this costs nothing until pacman actually rewrites one of
+# the two files the plugin forks. noctalia-shell-git tracks master, so that
+# happens on roughly every system update.
+PathChanged=/etc/xdg/quickshell/noctalia-shell/Modules/Bar/Widgets/SystemMonitor.qml
+PathChanged=/etc/xdg/quickshell/noctalia-shell/Modules/Panels/Settings/Bar/WidgetSettings/SystemMonitorSettings.qml
+
+# A package upgrade replaces the whole tree; give it a moment to settle so the
+# merge does not run against a half-written directory.
+Unit=noctalia-fork-sync.service
+
+[Install]
+WantedBy=paths.target
