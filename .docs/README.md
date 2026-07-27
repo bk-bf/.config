@@ -68,7 +68,6 @@ just a recipe.
 | [SESSION-PACKAGE-PROFILES.md](./SESSION-PACKAGE-PROFILES.md) | Per-session package profiles |
 | [sync/CLAUDE-SESSIONS-SYNC.md](./sync/CLAUDE-SESSIONS-SYNC.md) | Claude session sync to the server |
 | [SYSTEM_SYMLINKS.md](./SYSTEM_SYMLINKS.md) | Every symlink from this repo into system paths |
-| [ACTIVITYWATCH.md](./ACTIVITYWATCH.md) | Time tracking — ⚠️ partially stale, see its banner |
 
 ---
 
