@@ -76,8 +76,10 @@ lives in those code paths, and the upstream fix is not fully shipped.
    workspace/memory fixes.
 2. **Periodic restart** — restart Zen every few hours before RAM climbs toward swap. The
    browser state (tabs, workspaces) restores cleanly.
-3. **Monitor `about:memory`** — if RSS climbs above ~12 GB system used, restart. Below that
-   the system is not actually pressured (swap stays empty).
+3. **Monitor `about:memory`** — if RSS climbs above ~12 GB system used, restart.
+   The "swap stays empty" observation below no longer holds: as of Jul 2026 zram routinely
+   runs full (13.1 GB of pages compressed into 4.05 GB of physical RAM, 3.32× ratio) with
+   under 1 GB free. Swap pressure is now a real contributor, not a spare indicator.
 4. **Fall back to Helium** — better memory behaviour (~2.5 GB lower baseline, no growth),
    but ~12% video frame drops vs ~6.5% in Zen. See
    [HELIUM_OPTIMISATIONS.md](./HELIUM_OPTIMISATIONS.md).
@@ -86,9 +88,50 @@ lives in those code paths, and the upstream fix is not fully shipped.
 
 ## Video playback
 
-No issues. Zen/Gecko's Wayland presentation pipeline handles VSync and frame callbacks more
-robustly on Hyprland + Intel Arc MTL than Chromium's compositor. Frame drops are ~6.5% vs
-Helium's ~12% after all Helium fixes were applied — this was the primary reason for returning
-to Zen.
+Zen/Gecko's Wayland presentation pipeline handles VSync and frame callbacks more robustly on
+Hyprland + Intel Arc MTL than Chromium's compositor — this was the primary reason for
+returning to Zen.
 
-VA-API hardware decode is handled by Firefox's own pipeline (no flags needed).
+### Hardware decode requires a flag (corrected Jul 2026)
+
+An earlier revision of this file claimed VA-API decode "is handled by Firefox's own pipeline
+(no flags needed)". That was wrong. Gecko does **not** enable hardware video decoding by
+default on Linux/Intel; it stays off unless explicitly forced.
+
+```js
+user_pref("media.hardware-video-decoding.force-enabled", true);   // ~/.zen/zen-default/user.js
+```
+
+How the software fallback was identified:
+
+| Check | Result |
+|---|---|
+| `drm-engine-video` in `/proc/*/fdinfo/*`, all processes | `0 ns` — video engine never used, across a 29 h session |
+| Zen decode processes holding `/dev/dri/renderD128` | none; only the parent and GPU process hold DRM fds, render-only |
+| `ffmpeg -init_hw_device vaapi=/dev/dri/renderD128` | initialises cleanly |
+| `LIBVA_DRIVER_NAME`, `iHD_drv_video.so` | `iHD`, present |
+
+The driver stack was healthy throughout — Gecko simply never asked for it. Verify after any
+profile change, with a video playing:
+
+```sh
+grep drm-engine-video /proc/$(pgrep -f 'zen-bin.*contentproc' | head -1)/fdinfo/*
+```
+
+The frame-drop figures above (~6.5% Zen vs ~12% Helium) were measured under software decode
+and need re-measuring now that the GPU decoder is in use.
+
+### Note on the removed `max98390` rationale
+
+The pref previously carried a comment claiming forced hardware decode caused audio dropout on
+the Samsung max98390 speakers, "when GPU decode pipeline desynchs from CPU audio thread". That
+rationale does not hold and has been removed:
+
+- The max98390 defect is device *enumeration* — three of four amps are not created by ACPI, so
+  they are instantiated over I2C and bound by a DKMS module. The failure mode is *no speakers*,
+  not dropouts. See [SPEAKER_FIX.md](../audio/SPEAKER_FIX.md). Both kernels currently have
+  `max98390-hda/1.0` installed and the module loaded.
+- The stated mechanism is backwards: A/V sync runs off a media clock that audio owns, and when
+  video decode falls behind Gecko drops *video* frames to keep audio continuous.
+- The pref was set to `false`, which is already Gecko's default — so it disabled nothing. It
+  documented a change that never took effect.
