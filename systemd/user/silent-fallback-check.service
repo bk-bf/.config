@@ -1,0 +1,14 @@
+[Unit]
+Description=Report subsystems running degraded while a setting claims otherwise
+Documentation=man:systemd.timer(5)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.config/scripts/silent-fallback-check.sh --notify --quiet
+
+# Divergences are reported via notify-send; a non-zero exit is the normal way
+# this unit signals them and must not be logged as a unit failure.
+SuccessExitStatus=1 2 3 4 5 6 7
+
+MemoryMax=64M
+OOMScoreAdjust=500

@@ -1,0 +1,12 @@
+[Unit]
+Description=Check hourly for silently degraded subsystems
+
+[Timer]
+# Not sooner: the video-decode check needs a browser older than 1h to conclude
+# that a zero engine total means anything.
+OnBootSec=90min
+OnUnitActiveSec=1h
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target
