@@ -85,10 +85,21 @@
     "widgets": {
       "center": [
         {
+          "cpuIntensive": false,
+          "defaultSettings": {
+            "binPath": "~/.local/bin/mem-top",
+            "critPct": 88,
+            "intervalMs": 10000,
+            "limit": 14,
+            "warnPct": 75
+          },
+          "displayMode": "alwaysShow",
+          "iconColor": "none",
+          "id": "plugin:mem-top",
+          "textColor": "none",
+          "useMonospaceFont": false,
           "compactMode": false,
           "diskPath": "/",
-          "iconColor": "none",
-          "id": "SystemMonitor",
           "showCpuCores": false,
           "showCpuFreq": false,
           "showCpuTemp": true,
@@ -99,26 +110,10 @@
           "showGpuTemp": false,
           "showLoadAverage": false,
           "showMemoryAsPercent": true,
-          "showMemoryUsage": true,
+          "showMemoryUsage": false,
           "showNetworkStats": false,
           "showSwapUsage": false,
-          "textColor": "none",
-          "useMonospaceFont": false,
           "usePadding": false
-        },
-        {
-          "cpuIntensive": false,
-          "defaultSettings": {
-            "binPath": "~/.local/bin/mem-top",
-            "intervalMs": 10000,
-            "limit": 14,
-            "warnPct": 75,
-            "critPct": 88
-          },
-          "displayMode": "alwaysShow",
-          "iconColor": "none",
-          "id": "plugin:mem-top",
-          "textColor": "none"
         }
       ],
       "left": [
