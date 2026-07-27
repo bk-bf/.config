@@ -14,6 +14,16 @@ previous_tab = "ctrl+shift+tab"
 next_workspace = "ctrl+shift+space"
 goto = "ctrl+f"
 
+[[keys.command]]
+key = "prefix+v"
+type = "shell"
+command = "/home/kirill/.config/bin/herdr-claude right"
+
+[[keys.command]]
+key = "prefix+s"
+type = "shell"
+command = "/home/kirill/.config/bin/herdr-claude down"
+
 [ui]
 agent_panel_sort = "spaces"
 

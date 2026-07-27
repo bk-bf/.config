@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Split a Herdr pane and start Claude Code in the new one.
+#
+#   herdr-claude [right|down] [pane_id]
+#
+# Without a pane id the focused pane is split, which is what a keybinding wants.
+set -euo pipefail
+
+dir="${1:-right}"
+target="${2:-}"
+
+case "$dir" in
+right | down) ;;
+*)
+	echo "usage: ${0##*/} [right|down] [pane_id]" >&2
+	exit 2
+	;;
+esac
+
+pane=$(herdr pane split ${target:+--pane "$target"} --direction "$dir" --focus |
+	jq -er '.result.pane.pane_id')
+
+herdr pane run "$pane" claude
