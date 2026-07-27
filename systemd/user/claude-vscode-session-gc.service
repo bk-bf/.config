@@ -1,0 +1,11 @@
+[Unit]
+Description=Terminate helper processes for deleted VS Code Claude Code sessions
+Documentation=man:systemd.timer(5)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.config/scripts/claude-vscode-session-gc.sh
+
+# This exists to free memory; it must never be a consumer itself.
+MemoryMax=64M
+OOMScoreAdjust=500
