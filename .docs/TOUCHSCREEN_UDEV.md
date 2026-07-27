@@ -35,14 +35,14 @@ Match only on the stable device name attribute:
 SUBSYSTEM=="input", ATTRS{name}=="GXTP7936:00 27C6:0123", ENV{LIBINPUT_IGNORE_DEVICE}="1"
 ```
 
-This is tracked at `~/.config/docs/99-disable-touchscreen.rules` and deployed to `/etc/udev/rules.d/`.
+This is tracked at `~/.config/.docs/udev/99-disable-touchscreen.rules` and deployed to `/etc/udev/rules.d/`.
 
 ---
 
 ## Restore
 
 ```bash
-sudo cp ~/.config/docs/99-disable-touchscreen.rules /etc/udev/rules.d/
+sudo cp ~/.config/.docs/udev/99-disable-touchscreen.rules /etc/udev/rules.d/
 sudo udevadm control --reload
 ```
 

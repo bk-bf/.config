@@ -38,7 +38,7 @@ The system reads the file from its expected path as normal — it never knows it
 | `s2idle/s2idle-optimize.service`       | `/etc/systemd/system/s2idle-optimize.service` | Runtime PM systemd unit                                                                                                                                        |
 | `s2idle/s2idle-optimize.sh`            | `/usr/local/bin/s2idle-optimize.sh`           | Runtime PM script                                                                                                                                              |
 | `pkg-tracker.hook`                     | `/etc/pacman.d/hooks/pkg-tracker.hook`        | Auto-updates pkglist.txt on package changes                                                                                                                    |
-| `docs/99-disable-touchscreen.rules`    | `/etc/udev/rules.d/99-disable-touchscreen.rules` | Suppresses GXTP7936 touchscreen from libinput — see [TOUCHSCREEN_UDEV.md](./TOUCHSCREEN_UDEV.md) |
+| `.docs/udev/99-disable-touchscreen.rules`    | `/etc/udev/rules.d/99-disable-touchscreen.rules` | Suppresses GXTP7936 touchscreen from libinput — see [TOUCHSCREEN_UDEV.md](./TOUCHSCREEN_UDEV.md) |
 
 ---
 
@@ -56,7 +56,7 @@ sudo ln -sf ~/.config/s2idle/s2idle-optimize.service /etc/systemd/system/s2idle-
 sudo chmod +x ~/.config/s2idle/s2idle-optimize.sh
 sudo ln -sf ~/.config/s2idle/s2idle-optimize.sh /usr/local/bin/s2idle-optimize.sh
 sudo ln -sf ~/.config/pkg-tracker.hook /etc/pacman.d/hooks/pkg-tracker.hook
-sudo cp ~/.config/docs/99-disable-touchscreen.rules /etc/udev/rules.d/
+sudo cp ~/.config/.docs/udev/99-disable-touchscreen.rules /etc/udev/rules.d/
 
 sudo systemctl daemon-reload
 sudo limine-update
