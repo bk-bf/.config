@@ -72,6 +72,31 @@ nothing else wants it; interactive VS Code use is unaffected on an idle box. Thi
 deliberately not `CPUQuota`, which is a hard ceiling and would slow builds for no benefit when
 there is nothing to protect.
 
+## Running heavy things: `bgr`
+
+`bgr` (in `~/.config/.aliases`) is the standard way to start anything long and CPU-hungry on
+this machine — test runs, builds, watchers, batch jobs:
+
+```sh
+bgr npm test
+bgr cargo build --release
+```
+
+It launches the command into `background.slice` via a transient scope, so it inherits
+`CPUWeight=30` and yields to the compositor, browser and interactive terminals. On an idle
+machine it still gets everything — weights bind only under contention.
+
+Named `bgr`, not `bg`, because `bg` is a zsh builtin that resumes a suspended job.
+
+The scope **inherits the current directory**, so run it from the project root. Prefer the
+project's own script (`npm test`) over `npx`: npx falls back to downloading from the registry
+when it cannot find a local binary, and may fetch a different major version than the project
+pins.
+
+This is also the answer to the VS Code UI/background split noted above — a job started with
+`bgr` leaves the editor's own scope entirely, so the UI keeps full priority while the job runs
+at 30.
+
 ## Applying and verifying
 
 Drop-ins take effect for units started afterwards. For an already-running unit:

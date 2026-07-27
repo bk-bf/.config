@@ -197,3 +197,29 @@ unset _pacdim_sudo_alias
 pac() {
     sudo pacman "$@"
 }
+
+# bgr <cmd...> — run something at background priority so it yields to the desktop.
+#
+# Launches into background.slice (CPUWeight=30 vs 100 elsewhere), so the command
+# gives way to the compositor, browser and interactive terminals under contention
+# — and still gets the whole machine when nothing else wants it. This is the way
+# to start anything long and CPU-hungry on this box: test runs, builds, watchers.
+#
+#   bgr npm test          bgr cargo build --release          bgr npx tsc --watch
+#
+# Why it matters: background test runners saturating the cores starve the CPU-side
+# work that feeds the compositor against an 8.3ms frame budget at 120Hz, which
+# shows up as dropped video frames. See .docs/performance/CPU_PRIORITY.md.
+#
+# The scope inherits the current directory, so run it from the project root and
+# prefer `npm test` over `npx` (npx downloads from the registry when it cannot
+# find a local binary, and may fetch the wrong major version).
+#
+# Named bgr, not bg: `bg` is a zsh builtin that resumes a suspended job.
+bgr() {
+    if [ $# -eq 0 ]; then
+        echo "bgr: usage: bgr <command> [args...]" >&2
+        return 2
+    fi
+    systemd-run --user --slice=background.slice --scope --quiet -- "$@"
+}
