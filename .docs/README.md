@@ -23,7 +23,7 @@ just a recipe.
 | [performance/MEMORY_PRESSURE.md](./performance/MEMORY_PRESSURE.md) | `MemoryLow` protection vs `MemoryHigh` caps, the 2026-07 inversion, scoped `systemd-oomd`, the Claude reaper |
 | [performance/MEMORY_RECLAIM.md](./performance/MEMORY_RECLAIM.md) | Leaked processes that outlive their owner; measuring committed memory rather than RSS |
 | [performance/VIDEO_PLAYBACK.md](./performance/VIDEO_PLAYBACK.md) | Frame drops: Hyprland blur, VA-API decode, CPU contention; four ways the measurement lies |
-| [performance/CRASH_HISTORY_2026-07-23.md](./performance/CRASH_HISTORY_2026-07-23.md) | Session teardowns from OOM, with kernel task dumps |
+| [performance/CRASH_HISTORY.md](./performance/CRASH_HISTORY.md) | Running log of session losses — 2026-07-28 SIGKILL (**open**), 2026-07-23/24 OOM teardowns |
 | [performance/THERMAL_OPTIMIZATION.md](./performance/THERMAL_OPTIMIZATION.md) | Turbo/PL1 behaviour, `intel-undervolt`; why `cpufreq/boost` does not exist here |
 
 ## Power & battery

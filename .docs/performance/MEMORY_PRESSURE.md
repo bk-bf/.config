@@ -29,8 +29,14 @@ swap-thrash → system-wide lag, VS Code unusable. Two distinct causes:
 | --- | --- | --- | --- |
 | `claude-reaper` user timer | Daily reap of leaked Claude Code helpers >1 day | No (orphans only) | ✅ Active |
 | `session.slice` `MemoryLow=6G` | **Protects** the desktop from reclaim | No | ✅ Active |
-| `app.slice` `MemoryHigh=6G` | Soft cap on dev work → reclaim lands here | **No — throttles only** | ✅ Active |
-| `systemd-oomd`, scoped | Kills worst offender in `app`/`background` only | Yes | ⚠️ Configured; needs the system service enabled |
+| `app-code-*.scope` `MemoryHigh=9G` | Per-instance soft cap on VS Code | **No — throttles only** | ✅ Active |
+| `app.slice` `MemoryHigh` | slice-wide cap on dev work | — | ❌ **Removed same night — see below** |
+| `systemd-oomd`, scoped | Kills worst offender in `app`/`background` only | Yes | ✅ Active |
+
+> **A slice-wide `MemoryHigh=6G` on `app.slice` was set and removed on 2026-07-28.** It was
+> mis-sized from an idle reading and was reachable in ordinary loaded use. Do not reintroduce
+> it — the per-instance `app-code-.scope.d` cap is the right layer. Full reasoning in
+> [CRASH_HISTORY.md](./CRASH_HISTORY.md#2026-07-28--user-manager-sigkill-unresolved).
 
 ### The inversion (2026-07-28)
 
@@ -49,7 +55,8 @@ The knobs are not symmetric, and this is the trap:
 | `MemoryHigh` | soft **cap**, throttles via reclaim pressure |
 | `MemoryMax` | hard cap, OOM kill |
 
-Protection went to the desktop and the cap moved to dev work, where being slowed costs nothing.
+Protection went to the desktop. The matching cap on dev work was tried at the slice level and
+withdrawn the same night (above); capping now happens only per-instance, on `app-code-*.scope`.
 
 > **Watch for a shadow.** A `systemctl set-property` without `--runtime` writes a permanent
 > override into `~/.config/systemd/user.control/<unit>.d/`, which **takes precedence over the
@@ -78,17 +85,21 @@ systemd/user/background.slice.d/60-oomd.conf   → ManagedOOMMemoryPressure=kill
 ```
 
 Rationale: the kernel OOM killer picks by heuristic and has previously taken down desktop
-processes (see [CRASH_HISTORY_2026-07-23.md](./CRASH_HISTORY_2026-07-23.md)). A killed test
+processes (see [CRASH_HISTORY.md](./CRASH_HISTORY.md)). A killed test
 runner is a re-run; a killed compositor is the session.
 
 **Trade-off:** this can kill a VS Code instance with unsaved editor state under sustained severe
 pressure. The alternative is the kernel choosing.
 
-Requires the system service, which is **not currently enabled**:
+The system service is running. It is **not** enabled at boot — start it again after a reboot,
+or `systemctl enable systemd-oomd` to make it permanent:
 
 ```bash
 sudo systemctl enable --now systemd-oomd
 ```
+
+> Note: oomd was running during the 2026-07-28 session loss and killed nothing — its log is
+> empty for that boot. It is not implicated. See [CRASH_HISTORY.md](./CRASH_HISTORY.md).
 
 ---
 
@@ -120,16 +131,22 @@ Neither knob kills — both work through reclaim. `MemoryLow` makes the kernel t
 what is reclaimed (~3.3:1 measured), so this frees real RAM rather than hitting disk.
 
 - `systemd/user/session.slice.d/memory.conf` → `MemoryLow=6G` (protection, no ceiling)
-- `systemd/user/app.slice.d/50-memory.conf` → `MemoryHigh=6G` (cap on dev work)
+- `systemd/user/app-code-.scope.d/` → `MemoryHigh=9G` (per-instance cap, predates this work)
+- `systemd/user/app.slice.d/50-memory.conf` → `MemoryHigh=infinity` (**deliberately no cap**)
 
-The `app.slice` figure is sized so only bloat reaches it: normal use sits at ~2.0 GB, so there
-is 3× headroom and the VS Code UI is never reclaimed against. What does reach 6 GB is
-background growth — extension host, language servers, node test workers holding heaps.
+A slice-wide cap on `app.slice` was tried at 6 GB and removed the same night. The sizing was
+taken from a 1.7–2.0 GB idle reading, but `app.slice` reaches **3.4 GB within minutes of a fresh
+boot** and much more under vitest workers plus a headless test browser — so the cap was
+reachable in normal loaded use, not only under bloat. Worse, sustained `MemoryHigh` reclaim
+pushes pages into zram, and zram is compressed RAM, so it consumes physical RAM and tightens the
+pressure it was meant to relieve.
+
+**Size any future cap from the loaded case, never from an idle reading.**
 
 Applied live (note `--runtime`, see the shadow warning above):
 ```bash
 systemctl --user set-property --runtime session.slice MemoryLow=6G MemoryHigh=infinity
-systemctl --user set-property --runtime app.slice MemoryHigh=6G
+systemctl --user set-property --runtime app.slice MemoryHigh=infinity
 ```
 
 **Limit worth stating:** VS Code's UI and its background work share one
@@ -178,9 +195,8 @@ grep . "$B"/{session,app,background}.slice/memory.{low,high,current}
 - **Reaper too aggressive / too lax?** Change the age threshold:
   `CLAUDE_REAPER_MAX_AGE=43200 ~/.config/scripts/claude-reaper.sh` (seconds), or edit
   the default in the script.
-- **Dev work feels throttled?** Raise `app.slice`'s cap — edit
-  `app.slice.d/50-memory.conf` and re-run
-  `systemctl --user set-property --runtime app.slice MemoryHigh=8G`. Lower it to reclaim sooner.
+- **Dev work feels throttled?** There is no slice-wide cap by design. The per-instance limit is
+  `app-code-.scope.d` → `MemoryHigh=9G`; raise that rather than adding one to `app.slice`.
 - **Desktop still stutters under pressure?** Raise the protection —
   `session.slice.d/memory.conf` → `MemoryLow=8G`. Do **not** put a `MemoryHigh` back on
   `session.slice`; that is the inversion this doc exists to warn about.

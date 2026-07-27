@@ -1,10 +1,96 @@
-# Crash History Report — Desktop session teardowns, night of 2026-07-23 → 24
+# Crash History — desktop session losses
 
-**Machine:** Arch/CachyOS (`cachyos-x8664`), 15.9 GB RAM, 15.9 GB swap, `vm.swappiness=150` (CachyOS udev rule).
-**Compositor:** Hyprland via uwsm — `wayland-wm@hyprland.desktop.service`.
-**Investigation basis:** kernel OOM task dumps, `systemctl` unit accounting, `systemd-oomd` state, coredump list, Claude Code transcript sizes. No reboot since 2026-07-16, so all logs since then are intact.
+Running log, newest first. **Machine:** Arch/CachyOS (`cachyos-x8664`), 15.9 GB RAM, zram-only
+swap, `vm.swappiness=150` (CachyOS udev rule). **Compositor:** Hyprland via uwsm —
+`wayland-wm@hyprland.desktop.service`.
+
+| Date | What happened | Cause | Status |
+|---|---|---|---|
+| 2026-07-28 | `user@1000.service` SIGKILLed, whole session lost | **unidentified** | 🔴 open, auditd trap armed |
+| 2026-07-23/24 | Three session teardowns | Kernel OOM under memory exhaustion | ✅ mitigated |
 
 ---
+
+# 2026-07-28 — user manager SIGKILL (UNRESOLVED)
+
+**The session did not crash — it was killed.**
+
+```
+01:11:07.503  user@1000.service: Main process exited, code=killed, status=9/KILL
+01:11:07      coredump: PID 491143 "code", SIGTRAP, si_code=SI_KERNEL
+01:11:08      user@1000.service: Failed with result 'signal'
+01:11:46.938  Power key pressed short → Powering off        (user-initiated)
+01:12:28      boot
+```
+
+The systemd **user manager's main process** took signal 9, so systemd tore down the entire
+session — 259 processes. In the same instant VS Code (PID 491143) self-aborted: `SIGTRAP` with
+`si_code=SI_KERNEL` is an `int3`, i.e. a Chromium internal CHECK failure, not an external kill.
+The reboot 39 s later was the power button and shut down cleanly; the machine never panicked.
+
+Two and a half minutes earlier the machine was **idle** — 82–94% idle, 9–26 W.
+
+## Ruled out — do not re-investigate these
+
+| Hypothesis | Evidence against |
+|---|---|
+| Kernel OOM | No `Out of memory` / `Killed process` anywhere in `journalctl -b -1 -k` |
+| cgroup OOM | No `Memory cgroup out of memory`; `memory.events` shows no `oom_kill` |
+| `systemd-oomd` | Its log is **empty** between start and stop — it killed nothing |
+| `OOMPolicy` cascade | `user@1000.service` already had `OOMPolicy=continue` (systemd's default for user managers); never armed |
+| oomd scope | `ManagedOOM` is `auto` everywhere except `app.slice`/`background.slice`; it could not target the session |
+| Own scripts | Nothing in the dotfiles sends SIGKILL — `claude-reaper`, `dev-server-gc` and the session GC all use SIGTERM |
+| Manual kill | Shell history for the window shows only an unrelated `kill <pid>` four minutes earlier |
+
+The `12.8G memory peak / 14.8G swap peak` reported on the unit are **lifetime** figures over
+4.5 days and do not pin anything to that night.
+
+## Possible contribution — unproven
+
+`MemoryHigh=6G` had been set on **`app.slice`** at 00:16 that night — the cgroup containing the
+VS Code that aborted. It was mis-sized: chosen from a 1.7–2.0 GB idle reading, while `app.slice`
+reaches **3.4 GB within minutes of a fresh boot** and far more under vitest workers (~300 MB
+each) plus a headless test browser (167 MB across 12 processes). It was therefore reachable in
+ordinary loaded use, not only under bloat as claimed when it was set.
+
+`MemoryHigh` throttles rather than kills, but sustained reclaim pushes pages into zram, and zram
+is compressed RAM — so filling it consumes physical RAM and tightens the very pressure it was
+meant to relieve. A Chromium CHECK failure is a plausible downstream effect of allocation stalls.
+
+Removed at 01:20 (commit `f06202c`) because it was the riskiest recent change with the least
+demonstrated benefit — **not** because it was shown to be at fault.
+
+> **Do not reintroduce a slice-wide `MemoryHigh` on `app.slice`.** The per-instance
+> `app-code-.scope.d` → `MemoryHigh=9G` backstop is sufficient. See
+> [MEMORY_PRESSURE.md](./MEMORY_PRESSURE.md).
+
+## Monitoring
+
+`auditd` armed with a `kill(sig=9)` rule to name the sender on recurrence:
+
+```bash
+sudo systemctl start auditd
+sudo auditctl -a always,exit -F arch=b64 -S kill -F a1=9 -k sigkill
+```
+
+**Caveat:** as set up it was `active` but **not `enabled`**, and `auditctl` rules are not
+persistent — the trap is lost on reboot. To make it survive, put the rule in
+`/etc/audit/rules.d/` and `systemctl enable auditd`.
+
+Read back after an event:
+
+```bash
+sudo ausearch -k sigkill -ts today | grep -B2 "systemd --user"
+journalctl -b -1 | grep "code=killed, status=9/KILL"
+```
+
+---
+
+# 2026-07-23/24 — three OOM teardowns
+
+**Investigation basis:** kernel OOM task dumps, `systemctl` unit accounting, `systemd-oomd`
+state, coredump list, Claude Code transcript sizes. No reboot since 2026-07-16, so all logs
+since then were intact.
 
 ## The three events, side by side
 
