@@ -20,7 +20,7 @@ type = "shell"
 command = "/home/kirill/.config/bin/herdr-claude right"
 
 [[keys.command]]
-key = "prefix+s"
+key = "prefix+h"
 type = "shell"
 command = "/home/kirill/.config/bin/herdr-claude down"
 

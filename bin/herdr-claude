@@ -4,7 +4,18 @@
 #   herdr-claude [right|down] [pane_id]
 #
 # Without a pane id the focused pane is split, which is what a keybinding wants.
+# Keybinding-spawned shells inherit a minimal environment, so PATH is fixed up
+# here and every failure is logged to herdr-claude.log next to the config.
 set -euo pipefail
+
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+log="${XDG_CONFIG_HOME:-$HOME/.config}/herdr/herdr-claude.log"
+
+die() {
+	printf '%s %s\n' "$(date -Is)" "$*" >>"$log"
+	echo "$*" >&2
+	exit 1
+}
 
 dir="${1:-right}"
 target="${2:-}"
@@ -17,7 +28,11 @@ right | down) ;;
 	;;
 esac
 
-pane=$(herdr pane split ${target:+--pane "$target"} --direction "$dir" --focus |
-	jq -er '.result.pane.pane_id')
+split=$(herdr pane split ${target:+--pane "$target"} --direction "$dir" --focus 2>&1) ||
+	die "split failed: $split"
 
-herdr pane run "$pane" claude
+pane=$(printf '%s' "$split" | jq -er '.result.pane.pane_id' 2>/dev/null) ||
+	die "no pane id in split response: $split"
+
+herdr pane run "$pane" claude >/dev/null 2>&1 ||
+	die "pane run failed for $pane"
