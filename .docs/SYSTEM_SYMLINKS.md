@@ -105,9 +105,9 @@ Merge any relevant changes into the `~/.config` source, then delete the `.pacnew
 
 ## Related
 
-- [packages/PACKAGE_TRACKING.md](../packages/PACKAGE_TRACKING.md) — full file map and restore steps including these symlinks
-- [sddm/HIDPI.md](../sddm/HIDPI.md) — why `sddm.conf` exists outside `~/.config` natively
-- [battery/S2IDLE_OPTIMIZATION.md](../battery/S2IDLE_OPTIMIZATION.md) — s2idle service and script
-- [performance/THERMAL_OPTIMIZATION.md](../performance/THERMAL_OPTIMIZATION.md) — intel-undervolt config
+- [packages/PACKAGE_TRACKING.md](./packages/PACKAGE_TRACKING.md) — full file map and restore steps including these symlinks
+- [sddm/HIDPI.md](./sddm/HIDPI.md) — why `sddm.conf` exists outside `~/.config` natively
+- [battery/S2IDLE_OPTIMIZATION.md](./battery/S2IDLE_OPTIMIZATION.md) — s2idle service and script
+- [performance/THERMAL_OPTIMIZATION.md](./performance/THERMAL_OPTIMIZATION.md) — intel-undervolt config
 
-The same symlink pattern is also used for **private content** excluded from the public repo: `~/.config/opencode/commands` and `documentation/private/` are symlinks into `~/.local/share/` and tracked in a private bare repo on the local server. See [IDE_SETUP.md](./IDE_SETUP.md) (Opencode section) and `documentation/private/OPENCODE_INFRA.md` / `documentation/private/PKGLIST_INFRA.md`.
+The same symlink pattern is also used for **private content** excluded from the public repo: `~/.config/opencode/commands` and `documentation/private/` are symlinks into `~/.local/share/` and tracked in a private bare repo on the local server. See `documentation/private/OPENCODE_INFRA.md` / `documentation/private/PKGLIST_INFRA.md`.

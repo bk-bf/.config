@@ -1,5 +1,10 @@
 # ActivityWatch — Time Tracking Setup
 
+> **Partially stale (2026-07-28).** `aw-watcher-opencode.service` is referenced here but
+> reports `not-found` to systemd, and `~/.config/activitywatch/` no longer exists — only the
+> data directory `~/.local/share/activitywatch/` (last written Feb 2026) survives. Treat the
+> OpenCode-watcher section as history until re-verified.
+
 CachyOS (Hyprland/Wayland) time-tracking stack built around ActivityWatch, with per-project
 opencode session tracking and a hand-tuned category tree visible in the Summary view.
 

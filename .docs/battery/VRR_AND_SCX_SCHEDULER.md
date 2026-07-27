@@ -1,7 +1,7 @@
 # VRR & SCX Scheduler — Power/Performance Tuning
 
-**Date:** March 2026 | **Updated:** April 2026  
-**Status:** VRR ✅ Active | SCX ✅ Active (`scx_lavd` running via `scx_loader.service`)
+**Date:** March 2026 | **Updated:** July 2026  
+**Status:** VRR ❌ **Disabled** (`vrr = 0`) | SCX ✅ Active (`scx_lavd` via `scx_loader.service`)
 
 ---
 
@@ -17,12 +17,19 @@ can drop well below 120Hz, reducing GPU/display power draw.
 
 ```
 misc {
-    vrr = 1  # 0=off, 1=always on, 2=fullscreen-only
+    vrr = 0  # 0=off, 1=always on, 2=fullscreen-only
 }
 ```
 
 ### Status
-Active (`vrr = 1` in `hyprland.conf`). Was disabled temporarily due to annoyance; re-enabled April 2026.
+**Disabled.** `vrr = 0` in `hyprland.conf`, confirmed live with `hyprctl getoption misc:vrr`.
+The config comment records why: *"adaptive sync disabled — fixes Chromium video frame pacing"*.
+
+This doc previously claimed `vrr = 1` and "re-enabled April 2026" — that was stale. Leave VRR
+off unless deliberately retesting: frame pacing is the dominant cause of dropped video frames on
+this machine, and VRR is a known aggravator. See
+[../performance/VIDEO_PLAYBACK.md](../performance/VIDEO_PLAYBACK.md). If revisiting, `vrr = 2`
+(fullscreen-only) is the usual compromise rather than `1`.
 
 ---
 

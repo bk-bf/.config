@@ -7,7 +7,7 @@
 
 - CachyOS, Hyprland/Wayland, Intel Arc MTL
 - Display: 2880×1800 native @ 120Hz, scale=2 (logical 1440×900), eDP-1
-- Zen 1.19.8b (Firefox 149.0.2 base)
+- Zen 1.21.8b (Firefox 149 base) — was 1.19.8b when this doc was written
 
 ---
 
@@ -21,6 +21,7 @@
   by only ~1% (~160 MB) and it climbs back within minutes. This confirms an active leak, not
   just jemalloc page retention.
 - Swap remains barely touched (< 1 MB) — not causing pressure, but the growth trend is real.
+  **Superseded (Jul 2026): zram now routinely runs full — see "Practical options" below.**
 
 ### Root causes
 
@@ -81,7 +82,8 @@ lives in those code paths, and the upstream fix is not fully shipped.
    runs full (13.1 GB of pages compressed into 4.05 GB of physical RAM, 3.32× ratio) with
    under 1 GB free. Swap pressure is now a real contributor, not a spare indicator.
 4. **Fall back to Helium** — better memory behaviour (~2.5 GB lower baseline, no growth),
-   but ~12% video frame drops vs ~6.5% in Zen. See
+   but worse video. Note the old "12% vs 6.5%" comparison was never like-for-like and Zen now
+   measures 0.78% once blur and hardware decode are fixed. See
    [HELIUM_OPTIMISATIONS.md](./HELIUM_OPTIMISATIONS.md).
 
 ---
@@ -91,7 +93,9 @@ lives in those code paths, and the upstream fix is not fully shipped.
 > **Canonical doc: [../performance/VIDEO_PLAYBACK.md](../performance/VIDEO_PLAYBACK.md)** —
 > covers both causes of frame drops (Hyprland blur compositing, and Gecko not enabling VA-API),
 > the measured before/after, and how to verify decode without fooling yourself.
-> Blur was the larger factor by far: 32.7% → 6.5% dropped frames on AV1 1440p60.
+> Blur was the dominant factor: 32.7% → 0.78% (7/900) dropped frames with a `no_blur`
+> window rule for Zen. CPU contention from dev workloads is a third cause — see
+> [../performance/CPU_PRIORITY.md](../performance/CPU_PRIORITY.md).
 
 Zen/Gecko's Wayland presentation pipeline handles VSync and frame callbacks more robustly on
 Hyprland + Intel Arc MTL than Chromium's compositor — this was the primary reason for
@@ -123,8 +127,9 @@ profile change, with a video playing:
 grep drm-engine-video /proc/$(pgrep -f 'zen-bin.*contentproc' | head -1)/fdinfo/*
 ```
 
-The frame-drop figures above (~6.5% Zen vs ~12% Helium) were measured under software decode
-and need re-measuring now that the GPU decoder is in use.
+Re-measured after the fix: **0.78% (7/900)** on VP9 1440p60, with hardware decode confirmed
+and a `no_blur` window rule in place. The old ~6.5% figure was software-decode-with-blur and is
+superseded.
 
 ### Note on the removed `max98390` rationale
 

@@ -1,3 +1,9 @@
+> **ARCHIVED (2026-07-28).** This subsystem no longer exists. `~/.config/taildrop-sync/` is
+> gone, both scripts it describes are absent, and the vault it targeted
+> (`~/Documents/Obsidian/`) has moved to `~/Documents/remote/notes`. Kept for history only —
+> nothing here reflects the current machine. Current sync:
+> [../../sync/CLAUDE-SESSIONS-SYNC.md](../../sync/CLAUDE-SESSIONS-SYNC.md).
+
 # Taildrop Obsidian Server Sync
 
 This setup watches a directory on the remote Ubuntu host and pushes changed files over Taildrop, then receives them on this machine into Obsidian under `notes/projects/infrastructure/Server-Infrastructure`.
