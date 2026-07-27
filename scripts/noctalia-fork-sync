@@ -2,12 +2,16 @@
 """noctalia-fork-sync — keep forked Noctalia shell files current with upstream.
 
 The mem-top plugin's bar widget and widget-settings page are verbatim forks of
-two files shipped by the `noctalia-shell-git` package. That package tracks git
-master, so those files change often — and nothing carries those changes into the
-forks. Left alone they silently rot: the widget keeps working but stops gaining
-upstream fixes, and eventually breaks against a changed shell API.
+two files in the shell that actually runs: ~/Documents/local/Projects/noctalia
+(bk-bf/noctalia), symlinked over ~/.config/quickshell/noctalia-shell. NOT the
+/etc/xdg tree, which is the v4 package frozen at its 2026-06-09 build.
 
-This does a real 3-way merge on every package update:
+Those files move when he pulls `upstream/legacy-v4` into the fork. Note that
+legacy-v4 is EOL — upstream/main is the unrelated v5 native rewrite — so the
+expected change volume here is low and trending to zero. This exists so that a
+pull cannot silently rot the forks, not because churn is expected.
+
+This does a real 3-way merge whenever they move:
 
     base  = the upstream file as it was when the fork was taken (.upstream/)
     ours  = the fork, with our changes
@@ -36,7 +40,7 @@ import time
 PLUGIN = os.path.expanduser("~/.config/noctalia/plugins/mem-top")
 BASELINE = os.path.join(PLUGIN, ".upstream")
 STATE = os.path.expanduser("~/.local/state/noctalia-fork-sync")
-SHELL = "/etc/xdg/quickshell/noctalia-shell"
+SHELL = os.path.expanduser("~/Documents/local/Projects/noctalia")  # the fork IS the running shell (symlinked from ~/.config/quickshell)
 
 # fork file -> upstream file it was taken from
 FORKS = {
