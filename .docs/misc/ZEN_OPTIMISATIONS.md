@@ -88,6 +88,11 @@ lives in those code paths, and the upstream fix is not fully shipped.
 
 ## Video playback
 
+> **Canonical doc: [../performance/VIDEO_PLAYBACK.md](../performance/VIDEO_PLAYBACK.md)** —
+> covers both causes of frame drops (Hyprland blur compositing, and Gecko not enabling VA-API),
+> the measured before/after, and how to verify decode without fooling yourself.
+> Blur was the larger factor by far: 32.7% → 6.5% dropped frames on AV1 1440p60.
+
 Zen/Gecko's Wayland presentation pipeline handles VSync and frame callbacks more robustly on
 Hyprland + Intel Arc MTL than Chromium's compositor — this was the primary reason for
 returning to Zen.

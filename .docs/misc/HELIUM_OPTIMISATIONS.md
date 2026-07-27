@@ -107,6 +107,10 @@ Persistent video frame drops during YouTube playback that flags could not elimin
 - **Helium (Chromium/Blink)**: ~12% frame drops after all fixes
 - **Zen (Firefox/Gecko)** on same hardware/compositor: ~6.5% drops
 
+> **See also:** [../performance/VIDEO_PLAYBACK.md](../performance/VIDEO_PLAYBACK.md). The
+> `no_blur` window rule added here for Helium was the correct fix and was never carried over
+> when the browser moved back to Zen — blur accounted for ~80% of Zen's dropped frames.
+>
 > **Correction (Jul 2026):** this comparison was not like-for-like. Helium was measured with
 > VA-API decode fully enabled (above), but Zen was measured with hardware decode **off** —
 > Gecko does not enable it on Linux/Intel without `media.hardware-video-decoding.force-enabled`,
