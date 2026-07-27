@@ -24,14 +24,20 @@ compositor failed to paint on time *as well as* frames the decoder missed.
 | 1 | Hyprland blur compositing every frame | ~80% of drops | `no_blur` window rule per browser |
 | 2 | Gecko never enabling VA-API decode | the rest, plus high CPU | `media.hardware-video-decoding.force-enabled` |
 
-### Measured (2026-07-27, AV1 `av01.0.12M.08` itag 400, 2560×1440@60)
+### Measured (2026-07-27, 2560×1440@60)
 
-| Configuration | Dropped frames |
-|---|---|
-| Blur on | 710 / 2173 — **32.7%** |
-| Blur off | 94 / 1452 — **6.5%** |
+| Configuration | Codec | Dropped frames |
+|---|---|---|
+| Blur on | AV1 `av01.0.12M.08` (400) | 710 / 2173 — **32.7%** |
+| Blur off globally (runtime) | AV1 | 94 / 1452 — **6.5%** |
+| Blur on, `no_blur` rule for zen | VP9 `vp09.00.51.08` (308) | **7 / 900 — 0.78%** ✅ |
 
-Buffer health was 42 s with zero network activity in both runs, so bandwidth was never a factor.
+Buffer health was 20–42 s with zero network activity throughout, so bandwidth was never a
+factor. The window rule beats disabling blur globally — and keeps blur everywhere else.
+
+**Codec is not the variable.** A mid-session switch from AV1 to VP9 looked like a regression
+and was not: `drm-engine-video` climbed 6.36 s in a 5 s window during VP9 playback, so both
+codecs decode on the GPU. The drop rate changed because blur had been switched back on.
 
 ---
 
@@ -56,8 +62,15 @@ windowrule = no_blur on, match:class ^(zen)$
 ```
 
 Prefer the per-window rule over disabling blur globally — it keeps blur everywhere it costs
-nothing. `hyprctl keyword decoration:blur:enabled false` is runtime-only and is for testing;
-it does not survive a compositor restart.
+nothing, and measured better (0.78% vs 6.5%). `hyprctl keyword decoration:blur:enabled false`
+is runtime-only and is for testing; it does not survive a reload.
+
+> **`disable_autoreload = true` — a config edit is INERT until an explicit reload.** Adding the
+> rule to `hyprland.conf` changes nothing on a running compositor, and uptime here is routinely
+> measured in days, so "it will apply next session" means effectively never. Reload with
+> `$mod SHIFT R` or `hyprctl reload`, then re-measure. This cost a full diagnostic round: the
+> rule sat unloaded, blur was restored after testing, and the resulting 52.9% drop rate was
+> initially misread as a VP9 regression.
 
 Related knobs not yet exercised: `render:direct_scanout` (currently `0`) lets a *fullscreen*
 video bypass compositing entirely, which should beat `no_blur` for fullscreen playback.
@@ -114,6 +127,15 @@ The i915 PMU on this platform exposes `bcs`/`ccs` events but **no `vcs`** (video
 `perf` is not an alternative here. `intel_gpu_top` is not installed.
 
 ---
+
+## Cause 3: CPU contention starves the compositor, not the decoder
+
+Background test runs (vitest workers at ~100% CPU each) push drops back into double digits even
+with blur ruled out and hardware decode confirmed. Decode is unaffected — it is on the GPU
+video engine — but the CPU work feeding the 120 Hz composite misses the 8.3 ms budget.
+
+Addressed with cgroup weights so dev workloads yield to the desktop under contention. See
+[CPU_PRIORITY.md](./CPU_PRIORITY.md).
 
 ## Order of attack for future drops
 
