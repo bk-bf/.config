@@ -12,11 +12,18 @@
 #   2. its process tree is rooted at the systemd user manager -- i.e. the shell
 #      that launched it is gone. A server started from a terminal you still have
 #      open, or from VS Code, is never a candidate.
-#   3. it has ZERO established connections -- nothing is using it
-#   4. it is older than MIN_AGE
+#   3. it is NOT a managed systemd unit. A service's parent is also the user
+#      manager, so criterion 2 alone cannot tell "orphaned" from "supervised" --
+#      the cgroup can: a unit lives in app.slice/<name>.service, while an
+#      orphaned dev server keeps the cgroup of the terminal that launched it.
+#      (Learned the hard way: the first run killed codegraph.service, which
+#      systemd restarted three seconds later.)
+#   4. it has ZERO established connections -- nothing is using it
+#   5. it is older than MIN_AGE
 #
-# Criterion 3 protects a server you are actively hitting in a browser;
-# criterion 2 protects one you are about to hit.
+# Criterion 4 protects a server you are actively hitting in a browser;
+# criterion 2 protects one you are about to hit; criterion 3 protects the ones
+# you deliberately supervise.
 #
 # Usage: dev-server-gc.sh [--dry-run]
 set -euo pipefail
@@ -120,6 +127,17 @@ for pid, ports in sorted(listen.items()):
     live = estab.get(pid, 0)
     if live:
         print("keep   %-26s %d live connection(s)" % (portstr, live))
+        continue
+
+    # A managed unit is supervised, not abandoned -- and its parent is the user
+    # manager too, so only the cgroup distinguishes it.
+    unit = ""
+    for line in read(pid, "cgroup").splitlines():
+        path = line.rsplit(":", 1)[-1]
+        if path.endswith(".service"):
+            unit = path.rsplit("/", 1)[-1]
+    if unit:
+        print("keep   %-26s managed by %s" % (portstr, unit))
         continue
 
     root = pid
