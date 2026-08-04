@@ -234,4 +234,5 @@
   "ai-commit.OPENAI_TEMPERATURE": 0.3,
   "editor.definitionLinkOpensInPeek": true,
   "window.openFilesInNewWindow": "on",
+  "window.border": "off",
 }
