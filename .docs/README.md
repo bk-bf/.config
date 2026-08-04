@@ -59,6 +59,12 @@ just a recipe.
 | [misc/ZEN_OPTIMISATIONS.md](./misc/ZEN_OPTIMISATIONS.md) | Zen RAM growth, upstream leak tracking, hardware-decode flag |
 | [misc/HELIUM_OPTIMISATIONS.md](./misc/HELIUM_OPTIMISATIONS.md) | The Chromium evaluation that preceded returning to Zen — historical, not current |
 
+## Monitoring
+
+| Doc | Covers |
+|---|---|
+| [monitoring/WARDEN.md](./monitoring/WARDEN.md) | Journal watcher → notification → headless triage session; the three mechanisms that keep it quiet; `session_args` as the authority switch |
+
 ## Packages & sync
 
 | Doc | Covers |

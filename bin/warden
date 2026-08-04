@@ -1,0 +1,561 @@
+#!/usr/bin/env python3
+# warden — triage layer for journal-notify.sh.
+#
+# journal-notify.sh (~/.config/hypr/scripts/) already decides what breakage is
+# worth a toast, and does it well: allowlisted rules, a rate catcher for silent
+# error storms, escalating per-(rule,subject) cooldowns, coalescing, a burst
+# cap. warden does NOT re-watch the journal. It hangs off that script's notify()
+# choke point and answers the next question — can this be fixed — by handing the
+# incident to a headless Claude Code session.
+#
+#   warden triage <rule> <subject> <body>   entry point, called by journal-notify
+#   warden status                           recent incidents, verdicts, budget
+#   warden fix <id>                         run the session by hand
+#   warden report <id>                      full transcript for one incident
+#   warden test                             inject a synthetic incident
+#   warden doctor                           config, tooling, hook wiring
+#
+# A toast is cheap; a session is not. So warden applies its own gate on top of
+# journal-notify's: only `triage_rules` are actionable at all, one incident per
+# fingerprint per `cooldown_min`, and `max_sessions_per_day` overall.
+#
+# How much authority a session has is a config decision, not a built-in:
+# `session_args` is passed verbatim to `claude`. Left at its default the session
+# reads and reports but cannot change anything.
+#
+# Config  ~/.config/warden/config.json
+# State   ~/.local/state/warden/
+
+import fcntl
+import fnmatch
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
+
+CONFIG_DIR = Path(os.path.expanduser("~/.config/warden"))
+CONFIG = CONFIG_DIR / "config.json"
+STATE_DIR = Path(os.path.expanduser("~/.local/state/warden"))
+INCIDENTS = STATE_DIR / "incidents"
+REPORTS = STATE_DIR / "reports"
+STATE = STATE_DIR / "state.json"
+LOCK = STATE_DIR / "session.lock"
+
+DEFAULTS = {
+    "enabled": True,
+    "model": "sonnet",
+    # Extra flags for the headless `claude` call. Empty means the session runs
+    # under normal permissions: it can read the system and write its report, and
+    # anything it wants to change it has to describe instead.
+    "session_args": [],
+
+    # Which of journal-notify's rules are worth a session.
+    #
+    # oom, pressure and coredump are deliberately absent. There is nothing for a
+    # session to fix in a kill that already happened, and starting a Claude
+    # process in response to memory pressure is the one thing guaranteed to make
+    # the situation worse on a 16GB machine — it would be competing for the RAM
+    # whose exhaustion triggered it.
+    "triage_rules": ["unitfail", "osd", "diskfull", "storm"],
+
+    "cooldown_min": 360,          # same fingerprint gets one session this often
+    "max_sessions_per_day": 6,
+    "session_timeout_sec": 900,
+    "verify_restart": True,       # re-run the unit afterwards to prove the fix
+
+    # Subjects never worth a session, as fnmatch globs.
+    "ignore_subjects": [
+        "warden*",
+        "app-*.scope",
+        "app-com.github.wwmm.easyeffects@autostart.service",
+    ],
+
+    # Context for the session, matched on (rule, subject). First match wins;
+    # `subject` is an fnmatch glob and may be omitted to match any.
+    "context": [
+        {
+            "rule": "osd",
+            "cwd": "~/Documents/local/Projects/osd",
+            "hint": ("osd refuses to propagate this many deletions. Work out "
+                     "WHY the deletions appeared before deciding whether to let "
+                     "them through — a legitimate cleanup and a broken replica "
+                     "look identical from the guard's side. The sync config is "
+                     "~/.config/osync/osd.toml; the guard is delete_guard."),
+        },
+        {
+            "rule": "unitfail",
+            "subject": "osd-*",
+            "cwd": "~/Documents/local/Projects/osd",
+            "hint": "This unit runs `osd --guarded-sync`; exit code 3 means the "
+                    "deletion guard blocked the sync rather than osync failing.",
+        },
+    ],
+}
+
+# Echoed into every prompt. These mirror the standing rules in
+# ~/.config/AGENTS.md — a session running while he is asleep must not reboot the
+# machine or reload the compositor.
+GUARDRAILS = """\
+Hard limits for this session:
+- Never reboot, suspend, or reload/restart anything except the failing unit.
+- Never run `hyprctl reload` — this is a live desktop.
+- Never install or remove packages (no yay, no pacman).
+- Never `git push`, and never touch a repo other than the one this failure
+  lives in.
+- Change as little as possible. A one-line config fix beats a refactor.
+- If the right answer is "this needs a human", say so and change nothing.
+"""
+
+
+# ── config + state ───────────────────────────────────────────────────────────
+def load_config() -> dict:
+    cfg = json.loads(json.dumps(DEFAULTS))
+    try:
+        cfg.update(json.loads(CONFIG.read_text()))
+    except (OSError, json.JSONDecodeError):
+        pass
+    return cfg
+
+
+def load_state() -> dict:
+    try:
+        return json.loads(STATE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"seen": {}, "sessions": {}}
+
+
+@contextmanager
+def state_txn():
+    """Locked read-modify-write of state.json. journal-notify can call `warden
+    triage` several times in quick succession and a session writes its own
+    tally, so an unlocked load/save pair silently drops whichever write landed
+    in between."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(STATE_DIR / "state.lock", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            st = load_state()
+            yield st
+            tmp = STATE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(st, indent=2) + "\n")
+            tmp.replace(STATE)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def notify(cfg: dict, title: str, body: str = "", urgency: str = "normal") -> None:
+    """warden only ever notifies about ITSELF — a session's verdict, or a reason
+    it declined to run one. Notifying about the incident is journal-notify's
+    job and duplicating it is what this rework exists to stop."""
+    if not shutil.which("notify-send"):
+        return
+    try:
+        subprocess.run(["notify-send", "-a", "warden", "-u", urgency, title, body],
+                       timeout=6, check=False)
+    except Exception:  # noqa: BLE001 — a notification must never break triage
+        pass
+
+
+def run(cmd, timeout=30, **kw) -> tuple[int, str]:
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kw)
+        return p.returncode, (p.stdout or "") + (p.stderr or "")
+    except subprocess.TimeoutExpired:
+        return 124, f"timed out after {timeout}s"
+    except OSError as e:
+        return 127, str(e)
+
+
+# ── incidents ────────────────────────────────────────────────────────────────
+def normalise(message: str) -> str:
+    """Numbers are the part that varies between retries — osd counts deletions
+    in its message and the count climbs (38 → 56 → 63 over three minutes), so
+    without this each retry looks like a brand-new event."""
+    return re.sub(r"\d+", "#", message)[:200]
+
+
+def fingerprint(rule: str, subject: str, body: str) -> str:
+    return hashlib.sha1(f"{rule}|{subject}|{normalise(body)}".encode()).hexdigest()[:12]
+
+
+def context_for(cfg: dict, rule: str, subject: str) -> dict:
+    for c in cfg.get("context", []):
+        if c.get("rule") not in (None, rule):
+            continue
+        if c.get("subject") and not fnmatch.fnmatch(subject, c["subject"]):
+            continue
+        return c
+    return {}
+
+
+def cmd_triage(cfg: dict, rule: str, subject: str, body: str) -> int:
+    """Called by journal-notify.sh's notify(), after it has decided this event
+    is worth telling the user about. Everything here is a further narrowing."""
+    if not cfg.get("enabled", True):
+        return 0
+    if rule not in cfg.get("triage_rules", []):
+        return 0
+    if any(fnmatch.fnmatch(subject, p) for p in cfg.get("ignore_subjects", [])):
+        return 0
+
+    fp = fingerprint(rule, subject, body)
+    now = time.time()
+    inc_id = f"{datetime.now():%Y%m%d-%H%M%S}-{fp}"
+    ctx = context_for(cfg, rule, subject)
+
+    with state_txn() as st:
+        seen = st.setdefault("seen", {})
+        prev = seen.get(fp)
+        if prev and now - prev.get("first", 0) < int(cfg.get("cooldown_min", 360)) * 60:
+            prev["count"] = prev.get("count", 1) + 1
+            prev["last"] = now
+            return 0
+        seen[fp] = {"first": now, "last": now, "count": 1,
+                    "rule": rule, "subject": subject}
+        ok, why = session_budget(cfg, st)
+
+    inc = {"id": inc_id, "fingerprint": fp, "ts": now, "rule": rule,
+           "subject": subject, "unit": subject if ".service" in subject else "",
+           "message": body, "cwd": ctx.get("cwd"), "hint": ctx.get("hint")}
+    INCIDENTS.mkdir(parents=True, exist_ok=True)
+    (INCIDENTS / f"{inc_id}.json").write_text(json.dumps(inc, indent=2) + "\n")
+
+    if not ok:
+        notify(cfg, "warden · no session", f"{subject}\n{why}")
+        return 0
+    # Detached, resource-capped, and in background.slice so a session yields to
+    # the desktop the same way every other batch job here does.
+    subprocess.Popen(
+        ["systemd-run", "--user", "--quiet", "--collect",
+         f"--unit=warden-session-{fp}", "--slice=background.slice",
+         "--property=OOMScoreAdjust=700", "--property=MemoryMax=3G",
+         "--property=CPUWeight=20", "--property=Nice=10",
+         os.path.realpath(__file__), "fix", inc_id],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return 0
+
+
+def session_budget(cfg: dict, st: dict) -> tuple[bool, str]:
+    today = datetime.now().strftime("%Y-%m-%d")
+    n = st.setdefault("sessions", {}).get(today, 0)
+    cap = int(cfg.get("max_sessions_per_day", 6))
+    if n >= cap:
+        return False, f"daily cap reached ({n}/{cap}) — `warden fix <id>` to override"
+    if LOCK.exists() and time.time() - LOCK.stat().st_mtime < cfg.get("session_timeout_sec", 900):
+        return False, "another warden session is already running"
+    return True, ""
+
+
+# ── the session ──────────────────────────────────────────────────────────────
+def unit_context(unit: str) -> str:
+    """Everything a session needs to understand the failure without guessing."""
+    if not unit:
+        return "(this incident is not tied to a systemd unit)"
+    parts = []
+    for label, cmd in (
+        ("unit definition", ["systemctl", "--user", "cat", unit, "--no-pager"]),
+        ("current status", ["systemctl", "--user", "status", unit, "--no-pager", "-n", "0"]),
+        ("recent journal", ["journalctl", "--user", "-u", unit, "-n", "80",
+                            "--no-pager", "-o", "short-iso"]),
+    ):
+        _, out = run(cmd, timeout=20)
+        parts.append(f"--- {label} ---\n{out.strip()[:8000]}")
+    return "\n\n".join(parts)
+
+
+def snapper_snapshot(desc: str) -> str | None:
+    """Bracket the session so anything it does is revertible with `undo`."""
+    if not shutil.which("snapper"):
+        return None
+    rc, out = run(["snapper", "-c", "home", "create", "--print-number",
+                   "--description", desc, "--cleanup-algorithm", "number"], timeout=120)
+    num = out.strip().splitlines()[-1].strip() if rc == 0 and out.strip() else ""
+    return num if num.isdigit() else None
+
+
+def is_restartable(unit: str) -> bool:
+    """Only re-run things that are meant to be re-run — a oneshot, or anything a
+    timer drives. Restarting a long-lived service to 'verify' a fix is a good way
+    to break something that was working."""
+    if not unit.endswith(".service"):
+        return False
+    _, out = run(["systemctl", "--user", "show", unit,
+                  "-p", "Type", "-p", "TriggeredBy"], timeout=15)
+    props = dict(l.split("=", 1) for l in out.strip().splitlines() if "=" in l)
+    return props.get("Type") == "oneshot" or bool(props.get("TriggeredBy", "").strip())
+
+
+def build_prompt(inc: dict, ctx: str, may_change: bool) -> str:
+    hint = f"\nWhat is known about this failure:\n{inc['hint']}\n" if inc.get("hint") else ""
+    mandate = (
+        "Diagnose it and apply the fix if the fix is clear and safe."
+        if may_change else
+        "Diagnose it. You are running read-only: describe the fix precisely — "
+        "exact files, exact edits, exact commands — but do not apply it."
+    )
+    net = ("\nYour whole run is wrapped in a btrfs snapshot of /home, so a wrong "
+           "edit is recoverable — but that is a safety net, not a licence to "
+           "guess.\n" if may_change else "")
+    return f"""\
+Something on this machine (Arch/CachyOS laptop, Hyprland) is failing, and the
+desktop's journal watcher considered it worth waking a human for. You are
+running headless and unattended. {mandate}
+
+Subject: {inc['subject']}
+Rule:    {inc['rule']}  (from ~/.config/hypr/scripts/journal-notify.sh)
+Message: {inc['message']}
+{hint}
+{ctx}
+
+{GUARDRAILS}
+Work the problem: read the unit, read the code it runs, read the journal, and
+find the actual cause.
+{net}
+End your final message with exactly one line, in this form:
+
+WARDEN-VERDICT: fixed|no-change|needs-human — <one sentence, under 100 chars>
+"""
+
+
+def parse_session_output(raw: str) -> tuple[str, float | None]:
+    """`claude -p --output-format json` does not always return one object. It
+    can emit the whole stream as an array of events, in which case the answer is
+    the last element with type "result" — treating that array as a dict loses
+    both the text and the cost, and stores the raw event dump as the report."""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw.strip(), None
+    if isinstance(data, dict):
+        return data.get("result") or "", data.get("total_cost_usd")
+    if isinstance(data, list):
+        for item in reversed(data):
+            if isinstance(item, dict) and item.get("type") == "result":
+                return item.get("result") or "", item.get("total_cost_usd")
+    return raw.strip(), None
+
+
+def cmd_fix(cfg: dict, inc_id: str) -> int:
+    path = INCIDENTS / f"{inc_id}.json"
+    if not path.exists():
+        matches = sorted(INCIDENTS.glob(f"*{inc_id}*.json"))
+        if not matches:
+            sys.stderr.write(f"warden: no incident '{inc_id}'\n")
+            return 2
+        path = matches[-1]
+    inc = json.loads(path.read_text())
+
+    claude = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+    if not os.path.exists(claude):
+        notify(cfg, "warden · no session", "claude CLI not found")
+        return 1
+
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    LOCK.write_text(str(os.getpid()))
+    today = datetime.now().strftime("%Y-%m-%d")
+    with state_txn() as st:
+        st.setdefault("sessions", {})[today] = st.get("sessions", {}).get(today, 0) + 1
+
+    cwd = os.path.expanduser(inc.get("cwd") or "~")
+    if not os.path.isdir(cwd):
+        cwd = os.path.expanduser("~")
+
+    extra = [str(a) for a in cfg.get("session_args", [])]
+    may_change = bool(extra)   # an unelevated session cannot edit anything anyway
+    pre = snapper_snapshot(f"warden pre {inc_id} ({inc['subject']})") if may_change else None
+    prompt = build_prompt(inc, unit_context(inc.get("unit", "")), may_change)
+    started = time.time()
+    try:
+        p = subprocess.run(
+            [claude, "-p", "--output-format", "json",
+             "--model", cfg.get("model", "sonnet")] + extra,
+            input=prompt, capture_output=True, text=True, cwd=cwd,
+            timeout=int(cfg.get("session_timeout_sec", 900)),
+        )
+        raw = p.stdout
+    except subprocess.TimeoutExpired:
+        raw, p = "", None
+    post = snapper_snapshot(f"warden post {inc_id}") if may_change else None
+
+    text, cost = parse_session_output(raw)
+    if not text:
+        text = (p.stderr.strip()[:2000] if p else "session timed out")
+
+    m = re.search(r"WARDEN-VERDICT:\s*(fixed|no-change|needs-human)\s*[—-]\s*(.+)",
+                  text, re.I)
+    verdict = m.group(1).lower() if m else "unknown"
+    if m:
+        summary = m.group(2).strip()
+    else:
+        lines = [l for l in text.strip().splitlines() if l.strip()]
+        summary = lines[-1][:120] if lines else "no output"
+
+    # Prove it rather than take the session's word for it.
+    verified = None
+    unit = inc.get("unit", "")
+    if verdict == "fixed" and cfg.get("verify_restart", True) and unit and is_restartable(unit):
+        run(["systemctl", "--user", "start", unit], timeout=300)
+        rc, _ = run(["systemctl", "--user", "is-failed", unit], timeout=15)
+        verified = rc != 0                       # is-failed returns 0 when failed
+
+    report = {
+        "incident": inc, "verdict": verdict, "summary": summary,
+        "verified": verified, "cost_usd": cost, "read_only": not may_change,
+        "snapshot_pre": pre, "snapshot_post": post,
+        "duration_sec": round(time.time() - started, 1),
+        "transcript": text,
+    }
+    (REPORTS / f"{inc_id}.json").write_text(json.dumps(report, indent=2) + "\n")
+    LOCK.unlink(missing_ok=True)
+
+    icon = {"fixed": "✓", "no-change": "·", "needs-human": "✋"}.get(verdict, "?")
+    if verified is False:
+        icon, verdict = "✗", "still failing"
+    tail = f"\nrevert: undo <path> {pre}" if pre else ""
+    notify(cfg, f"{icon} warden · {inc['subject']}",
+           f"{summary}{tail}\nwarden report {inc_id}",
+           urgency="critical" if verdict in ("needs-human", "still failing") else "normal")
+    print(f"{verdict}: {summary}")
+    return 0
+
+
+# ── hook ─────────────────────────────────────────────────────────────────────
+JOURNAL_NOTIFY = Path(os.path.expanduser("~/.config/hypr/scripts/journal-notify.sh"))
+
+
+def hook_wired() -> bool:
+    """The hook is a shell function calling "$WARDEN" triage, so grepping the
+    script for the literal string `warden triage` reports a false negative."""
+    try:
+        text = JOURNAL_NOTIFY.read_text(errors="ignore")
+    except OSError:
+        return False
+    return 'triage "$rule"' in text and "WARDEN" in text
+
+
+# ── reporting ────────────────────────────────────────────────────────────────
+def cmd_status(cfg: dict) -> int:
+    st = load_state()
+    today = datetime.now().strftime("%Y-%m-%d")
+    used, cap = st.get("sessions", {}).get(today, 0), cfg.get("max_sessions_per_day", 6)
+    hooked = hook_wired()
+    mode = "can change files" if cfg.get("session_args") else "read-only"
+    print(f"hook      {'wired into journal-notify.sh' if hooked else 'NOT WIRED'}"
+          f"   sessions {mode}   model {cfg.get('model')}")
+    print(f"budget    {used}/{cap} today   cooldown {cfg.get('cooldown_min')}min"
+          f"   triaging {', '.join(cfg.get('triage_rules', []))}\n")
+
+    incs = sorted(INCIDENTS.glob("*.json"))[-15:] if INCIDENTS.exists() else []
+    if not incs:
+        print("no incidents recorded")
+        return 0
+    for p in incs:
+        inc = json.loads(p.read_text())
+        seen = st.get("seen", {}).get(inc.get("fingerprint", ""), {})
+        rep = REPORTS / p.name
+        if rep.exists():
+            r = json.loads(rep.read_text())
+            outcome = "still failing" if r.get("verified") is False else r["verdict"]
+            outcome += f" · {r['summary'][:56]}"
+        else:
+            outcome = "no session"
+        when = datetime.fromtimestamp(inc["ts"]).strftime("%d %b %H:%M")
+        subj = inc.get("subject", inc.get("unit", "?"))
+        print(f"{inc['id'][:24]}  {when}  {subj[:36]:36}"
+              f"  x{seen.get('count', 1):<4} {outcome}")
+    return 0
+
+
+def cmd_report(inc_id: str) -> int:
+    matches = sorted(REPORTS.glob(f"*{inc_id}*.json"))
+    if not matches:
+        sys.stderr.write(f"warden: no report for '{inc_id}'\n")
+        return 2
+    r = json.loads(matches[-1].read_text())
+    inc = r["incident"]
+    print(f"{inc['subject']}  —  {inc['message']}\n")
+    print(f"verdict   {r['verdict']}  ({r['summary']})")
+    print(f"verified  {r['verified']}   read-only: {r.get('read_only')}")
+    if r.get("snapshot_pre"):
+        print(f"snapshot  {r['snapshot_pre']} → {r['snapshot_post']}"
+              f"   revert with: undo <path> {r['snapshot_pre']}")
+    print(f"cost      ${r['cost_usd']}   {r['duration_sec']}s\n")
+    print(r["transcript"])
+    return 0
+
+
+def cmd_doctor(cfg: dict) -> int:
+    ok = True
+    for tool in ("journalctl", "systemd-run", "notify-send", "snapper"):
+        found = shutil.which(tool)
+        print(f"{'✓' if found else '✗'} {tool:14} {found or 'MISSING'}")
+        ok &= bool(found)
+    claude = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+    print(f"{'✓' if os.path.exists(claude) else '✗'} {'claude':14} {claude}")
+
+    wired = hook_wired()
+    print(f"{'✓' if wired else '✗'} journal-notify.sh calls `warden triage`  ({JOURNAL_NOTIFY})")
+    ok &= wired
+    rc, _ = run(["systemctl", "--user", "is-active", "journal-notify.service"], timeout=10)
+    if rc != 0:
+        rc = 0 if run(["pgrep", "-f", "journal-notify.sh"], timeout=10)[0] == 0 else 1
+    print(f"{'✓' if rc == 0 else '✗'} journal-notify is running")
+    rc, _ = run(["snapper", "-c", "home", "list"], timeout=20)
+    print(f"{'✓' if rc == 0 else '✗'} snapper 'home' config readable unprivileged")
+
+    print(f"\nconfig    {CONFIG}{'' if CONFIG.exists() else '  (using defaults)'}")
+    print(f"state     {STATE_DIR}")
+    print(f"triaging  {', '.join(cfg.get('triage_rules', [])) or 'nothing'}")
+    print(f"ignoring  {', '.join(cfg.get('ignore_subjects', [])) or 'nothing'}")
+    print(f"sessions  {'read-only' if not cfg.get('session_args') else 'claude ' + ' '.join(cfg['session_args'])}")
+    return 0 if ok else 1
+
+
+def cmd_test(cfg: dict) -> int:
+    # Not named warden-* — that is in ignore_subjects, so the self-test would
+    # be silently swallowed by warden's own filter and look like a broken hook.
+    subject = "selftest-probe.service"
+    cmd_triage(cfg, "unitfail", subject,
+               f"{subject}: Failed with result 'exit-code'. This is a synthetic "
+               "incident from `warden test`; change nothing and reply needs-human.")
+    print(f"injected {subject} — `warden status` in a minute or two")
+    return 0
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    cfg = load_config()
+    if not args or args[0] in ("-h", "--help", "help"):
+        print(Path(__file__).read_text().split("\n\n")[0]
+              .replace("#!/usr/bin/env python3\n", ""))
+        return 0
+    cmd, rest = args[0], args[1:]
+    if cmd == "triage":
+        if len(rest) < 2:
+            sys.stderr.write("warden: triage needs <rule> <subject> [body]\n")
+            return 2
+        return cmd_triage(cfg, rest[0], rest[1], " ".join(rest[2:]))
+    if cmd == "fix":
+        return cmd_fix(cfg, rest[0]) if rest else 2
+    if cmd == "status":
+        return cmd_status(cfg)
+    if cmd == "report":
+        return cmd_report(rest[0]) if rest else 2
+    if cmd == "test":
+        return cmd_test(cfg)
+    if cmd == "doctor":
+        return cmd_doctor(cfg)
+    sys.stderr.write(f"warden: unknown command '{cmd}'\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

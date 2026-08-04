@@ -159,6 +159,19 @@ notify() {
   [[ $urgency != critical ]] && ! burst_ok && return 0
   notify-send -a "system" -u "$urgency" \
     "${title}${suffix}" "${subject}"$'\n'"${body:0:180}"
+  triage "$rule" "$subject" "$body"
+}
+
+# Hand anything that got past every filter above to warden, which decides
+# whether it is worth a headless Claude Code session (`warden doctor` shows
+# which rules it acts on — oom and pressure are deliberately not among them).
+# Detached and failure-tolerant on purpose: triage is a bonus on top of the
+# toast, and must never be able to delay or break the notification path.
+WARDEN=~/.local/bin/warden
+triage() {
+  [[ -x $WARDEN ]] || return 0
+  setsid "$WARDEN" triage "$1" "$2" "$3" >/dev/null 2>&1 &
+  disown 2>/dev/null || true
 }
 
 # The silent-storm catcher. Counts error-priority lines per identifier in a
@@ -280,7 +293,10 @@ watch_pressure() {
 #   rate\t <identifier> \t \t <body>         — unmatched but error-priority, count it
 JQ_FILTER='
   (.MESSAGE // "") as $m
-| (._SYSTEMD_UNIT // .UNIT // .SYSLOG_IDENTIFIER // "system") as $unit
+  # _SYSTEMD_USER_UNIT first: for anything a --user unit runs, _SYSTEMD_UNIT is
+  # the manager (user@1000.service), so preferring it named every osd sync job
+  # "user@1000.service" and collapsed them all onto one cooldown key.
+| (._SYSTEMD_USER_UNIT // ._SYSTEMD_UNIT // .UNIT // .SYSLOG_IDENTIFIER // "system") as $unit
 | (.SYSLOG_IDENTIFIER // "") as $ident
 | (.PRIORITY // "6" | tonumber) as $prio
 | ( if   ($m | test("out of memory: Killed process"; "i")) then
@@ -305,7 +321,13 @@ JQ_FILTER='
         ( ($m | capture("^(?<u>[A-Za-z0-9@_.:\\\\-]+\\.(service|scope|socket|timer|mount|path)):").u // $unit) as $fu
         | if ($fu | test("^run-[pu]\\d+-i\\d+\\.service$|^run-r[a-f0-9]+\\.service$"))
           then empty else {t:"evt", r:"unitfail", s:$fu, b:$m} end )
-    elif ($ident == "osd") and ($m | test("blocked|ERROR|Could not|failed"; "i")) then
+    elif ($ident == "osd") and ($m | test("blocked|ERROR|Could not|failed|sync skipped|exceed the guard"; "i")) then
+        # "sync skipped"/"exceed the guard" were the gap: the deletion guard
+        # writes "<job>: N deletions exceed the guard of M — sync skipped." and
+        # none of the original four patterns appears in that sentence, so the
+        # most actionable osd event on this machine only ever surfaced as the
+        # generic unitfail toast, with the reason missing.
+        # (No apostrophes in this block: JQ_FILTER is single-quoted.)
         {t:"evt", r:"osd", s:$unit, b:$m}
     elif ($m | test("No space left on device")) then
         {t:"evt", r:"diskfull", s:$unit, b:$m}
