@@ -18,6 +18,10 @@ ExecStartPre=-/bin/sh -c 'test -f data/Fantasia4x.json || /usr/bin/node bin/code
 ExecStart=/usr/bin/node node_modules/vite/bin/vite.js dev --port 5185 --strictPort
 Restart=on-failure
 RestartSec=3
+# A plain SIGTERM is how systemd itself stops this, and how anything sweeping up stray `vite dev`
+# processes will end it. Without this, every ordinary stop is journalled as
+# "Failed with result 'exit-code'" (status=143 = 128+15), which buries a real failure in noise.
+SuccessExitStatus=143 SIGTERM
 
 [Install]
 WantedBy=default.target
