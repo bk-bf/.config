@@ -181,6 +181,98 @@ for pid, ports in sorted(listen.items()):
     print("reaped %-28s %d procs, %.0f MB freed" % (label, len(tree), mb))
     reaped += 1
 
+# ── Second pass: headless browsers orphaned from agent scratchpads ───────────
+# Different shape from a dev server, so the loop above cannot catch it: a
+# profiler/test browser holds no LISTEN socket, so it never enters `listen`.
+#
+# Observed 2026-07-28: `firefox --headless --marionette --profile ./ffprof3`,
+# launched by @firefox-devtools/profiler-cli from a Claude Code session, was
+# reparented to the user manager when that session moved on. It sat for 16
+# minutes at 14% CPU holding 7 renderD128 fds and 167 MB across 12 content
+# processes -- with nothing driving it. GPU contention matters here beyond the
+# CPU cost: cgroup weights cannot arbitrate the DRM render engine, so an
+# orphaned browser competes with the compositor at full strength no matter how
+# it is throttled, and shows up as dropped video frames.
+#
+# Reaped only when ALL hold:
+#   1. it is a browser running headless (never a browser you can see)
+#   2. its cwd is under an agent scratchpad -- /tmp/claude-<uid>/
+#   3. it is reparented to the systemd user manager, i.e. its launcher is gone
+#   4. it is not a managed systemd unit
+#   5. nothing is connected to it (no ESTAB -- no live marionette/CDP client)
+#   6. it is older than BROWSER_MIN_AGE (shorter than the dev-server threshold:
+#      these are ephemeral by nature, and one costs more while it lingers)
+browser_min_age = int(os.environ.get("DEV_SERVER_GC_BROWSER_MIN_AGE", "900"))
+scratch_prefix  = "/tmp/claude-%d/" % uid
+BROWSERS        = ("firefox", "chrome", "chromium", "zen-bin", "helium")
+
+def cwd_of(pid):
+    try:
+        return os.readlink("/proc/%s/cwd" % pid)
+    except Exception:
+        return ""
+
+browsers_reaped = 0
+for p in sorted(glob.glob("/proc/[0-9]*"), key=lambda x: int(x.split("/")[-1])):
+    pid = int(p.split("/")[-1])
+    try:
+        if os.stat(p).st_uid != uid:
+            continue
+    except Exception:
+        continue
+
+    cl = cmdline(pid)
+    if "--headless" not in cl:
+        continue
+    if not any(b in comm(pid) or b in cl.split(" ")[0] for b in BROWSERS):
+        continue
+    # only the top-level browser process, not its -contentproc children
+    if "-contentproc" in cl or "crashhelper" in cl:
+        continue
+
+    cwd = cwd_of(pid)
+    if not cwd.startswith(scratch_prefix):
+        continue
+    if ppid_of(pid) != manager_pid:
+        print("keep   headless browser %d -- still has a live parent" % pid)
+        continue
+
+    unit = ""
+    for line in read(pid, "cgroup").splitlines():
+        path = line.rsplit(":", 1)[-1]
+        if path.endswith(".service"):
+            unit = path.rsplit("/", 1)[-1]
+    if unit:
+        print("keep   headless browser %d -- managed by %s" % (pid, unit))
+        continue
+
+    tree = subtree(pid)
+    live = sum(estab.get(t, 0) for t in tree)
+    if live:
+        print("keep   headless browser %d -- %d live connection(s)" % (pid, live))
+        continue
+
+    age = age_of(pid)
+    if age < browser_min_age:
+        print("keep   headless browser %d -- only %.0f min old" % (pid, age / 60))
+        continue
+
+    mb = sum(mem_kb(t) for t in tree) / 1024
+    label = "%s (%s)" % (comm(pid), os.path.basename(cwd) or "scratchpad")
+    if dry:
+        print("would reap %-28s %d procs, %.0f MB, age %.0f min" % (label, len(tree), mb, age / 60))
+        continue
+    for t in reversed(tree):
+        try:
+            os.kill(t, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except PermissionError as e:
+            print("  cannot kill %d: %s" % (t, e), file=sys.stderr)
+    print("reaped %-28s %d procs, %.0f MB freed" % (label, len(tree), mb))
+    browsers_reaped += 1
+
 if not dry:
-    print("dev-server-gc: %d abandoned dev server(s) reaped" % reaped)
+    print("dev-server-gc: %d abandoned dev server(s), %d orphaned headless browser(s) reaped"
+          % (reaped, browsers_reaped))
 PYEOF
