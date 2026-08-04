@@ -324,22 +324,30 @@ WARDEN-VERDICT: fixed|no-change|needs-human — <one sentence, under 100 chars>
 """
 
 
-def parse_session_output(raw: str) -> tuple[str, float | None]:
+def parse_session_output(raw: str) -> tuple[str, float | None, str]:
     """`claude -p --output-format json` does not always return one object. It
     can emit the whole stream as an array of events, in which case the answer is
     the last element with type "result" — treating that array as a dict loses
-    both the text and the cost, and stores the raw event dump as the report."""
+    the text, the cost and the session id, and stores the raw event dump as the
+    report.
+
+    The session id is worth keeping: it is what `claude --resume <id>` needs to
+    reopen an agent's run interactively, which is the only way to read what it
+    actually did rather than the one line it chose to summarise with."""
+    def _from(d):
+        return (d.get("result") or "", d.get("total_cost_usd"),
+                d.get("session_id") or "")
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
-        return raw.strip(), None
+        return raw.strip(), None, ""
     if isinstance(data, dict):
-        return data.get("result") or "", data.get("total_cost_usd")
+        return _from(data)
     if isinstance(data, list):
         for item in reversed(data):
             if isinstance(item, dict) and item.get("type") == "result":
-                return item.get("result") or "", item.get("total_cost_usd")
-    return raw.strip(), None
+                return _from(item)
+    return raw.strip(), None, ""
 
 
 def cmd_fix(cfg: dict, inc_id: str) -> int:
@@ -385,7 +393,7 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
         raw, p = "", None
     post = snapper_snapshot(f"warden post {inc_id}") if may_change else None
 
-    text, cost = parse_session_output(raw)
+    text, cost, session_id = parse_session_output(raw)
     if not text:
         text = (p.stderr.strip()[:2000] if p else "session timed out")
 
@@ -409,6 +417,7 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
     report = {
         "incident": inc, "verdict": verdict, "summary": summary,
         "verified": verified, "cost_usd": cost, "read_only": not may_change,
+        "session_id": session_id, "cwd": cwd,
         "snapshot_pre": pre, "snapshot_post": post,
         "duration_sec": round(time.time() - started, 1),
         "transcript": text,

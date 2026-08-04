@@ -1,0 +1,662 @@
+#!/usr/bin/env python3
+# claude-status — the background Claude agents on this machine, and the things
+# wired up to start them.
+#
+#   claude-status            human-readable
+#   claude-status --json     the same data as JSON (noctalia plugin + dashboard)
+#   claude-status --push     ship a snapshot to the dashboard aggregator
+#   claude-status --follow <session-id>
+#                            tail a running agent's transcript, rendered readable
+#
+# Scope is deliberate. An interactive session in a terminal or an editor is
+# something you are already looking at; it is counted and otherwise left alone.
+# What has no surface at all is the unattended work — an agent warden started
+# because a unit failed while you were asleep — and the triggers that can start
+# one. Those are the two things this reports.
+#
+# "Running" is not the useful signal for an agent: a wedged headless run has the
+# same process, RSS and uptime as a working one. Claude Code appends to
+# ~/.claude/projects/<slug>/<session>.jsonl as it goes, so the mtime of that
+# file is when the agent last actually produced something. That is `idle_sec`.
+#
+# One source of truth on purpose: the noctalia plugin and the dashboard tab both
+# read this rather than each re-deriving what counts.
+
+import json
+import os
+import pwd
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+PROJECTS = HOME / ".claude" / "projects"
+WARDEN_STATE = HOME / ".local/state/warden"
+UID = os.getuid()
+
+# Units whose health means something for background Claude work. Anything that
+# is not installed is reported as absent rather than silently skipped — a
+# monitor that quietly stopped existing is the failure mode worth seeing.
+WATCHED_UNITS = [
+    ("journal-notify.service", "journal watcher"),
+    ("claude-memory-sync.timer", "memory mirror"),
+]
+
+
+def run(cmd, timeout=15) -> tuple[int, str]:
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, (p.stdout or "") + (p.stderr or "")
+    except (subprocess.TimeoutExpired, OSError):
+        return 1, ""
+
+
+# ── processes ────────────────────────────────────────────────────────────────
+def proc_field(pid: int, name: str) -> str:
+    try:
+        return (Path("/proc") / str(pid) / name).read_text()
+    except OSError:
+        return ""
+
+
+def proc_cwd(pid: int) -> str:
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return ""
+
+
+def proc_unit(pid: int) -> str:
+    """Last path component of the cgroup — for a transient session that is
+    warden-session-<fp>.service, which ties the process back to its incident."""
+    cg = proc_field(pid, "cgroup").strip()
+    if not cg:
+        return ""
+    leaf = cg.splitlines()[-1].rsplit("/", 1)[-1]
+    return leaf if leaf.endswith((".service", ".scope")) else ""
+
+
+def proc_start(pid: int) -> float:
+    try:
+        return (Path("/proc") / str(pid)).stat().st_ctime
+    except OSError:
+        return 0.0
+
+
+def classify(args: str, comm: str, pid: int) -> str | None:
+    """What kind of Claude this is. Returns None for anything that is not one.
+
+    claude-desktop is the GUI app — reported, but separately, because it is
+    already visible on screen and its dozen electron helpers would otherwise
+    drown out the sessions this tool exists to surface."""
+    if comm.startswith("claude-desktop") or "/claude-desktop" in args:
+        return "desktop"
+    if "chrome_crashpad" in args and "Claude" in args:
+        return None
+    if "anthropic.claude-code" in args or "native-binary/claude" in args:
+        return "ide"
+    if comm != "claude" and "/claude" not in args.split(" ")[0]:
+        return None
+    toks = args.split()
+    if "-p" in toks or "--print" in toks:
+        return "headless"
+    if proc_unit(pid).startswith("warden-session-"):
+        return "headless"
+    if "--resume" in toks or "-c" in toks or "--continue" in toks:
+        return "interactive"
+    return "interactive"
+
+
+def slug_for(cwd: str) -> str:
+    """Claude Code names a project directory after its path with separators
+    flattened to dashes."""
+    return cwd.replace("/", "-")
+
+
+def _describe(f: Path) -> dict:
+    try:
+        stat = f.stat()
+    except OSError:
+        return {}
+    return {"path": str(f), "session_id": f.stem, "mtime": stat.st_mtime,
+            "idle_sec": round(time.time() - stat.st_mtime, 1),
+            "size_kb": round(stat.st_size / 1024, 1)}
+
+
+def transcript_for(cwd: str, started: float, args: str, claimed: set) -> dict:
+    """Which transcript belongs to THIS process.
+
+    `--resume <id>` names it outright. Otherwise fall back to the newest file in
+    the project slug that was touched within the process lifetime — but claim
+    it, because several sessions are routinely open on the same directory and
+    without claiming they would all report the newest one, i.e. all show the
+    same liveness and three idle sessions would look busy."""
+    if not cwd:
+        return {}
+    d = PROJECTS / slug_for(cwd)
+    if not d.is_dir():
+        return {}
+
+    toks = args.split()
+    if "--resume" in toks:
+        i = toks.index("--resume")
+        if i + 1 < len(toks):
+            f = d / f"{toks[i + 1]}.jsonl"
+            if f.exists():
+                claimed.add(str(f))
+                return _describe(f)
+
+    best, best_m = None, 0.0
+    for f in d.glob("*.jsonl"):
+        if str(f) in claimed:
+            continue
+        try:
+            m = f.stat().st_mtime
+        except OSError:
+            continue
+        if m >= started - 5 and m > best_m:
+            best, best_m = f, m
+    if not best:
+        return {}
+    claimed.add(str(best))
+    return _describe(best)
+
+
+def processes() -> list[dict]:
+    rc, out = run(["ps", "-eo", "pid=,comm=,rss=,args="], timeout=20)
+    if rc != 0:
+        return []
+    found, desktop = [], {"kind": "desktop", "procs": 0, "rss_mb": 0.0}
+    now = time.time()
+    claimed: set = set()
+    # Youngest first, so a newly started session claims the transcript it just
+    # created before an older one on the same directory can take it.
+    lines = sorted(out.splitlines(),
+                   key=lambda l: -proc_start(int(l.split()[0]))
+                   if l.split() and l.split()[0].isdigit() else 0)
+    for line in lines:
+        parts = line.strip().split(None, 3)
+        if len(parts) < 4:
+            continue
+        pid_s, comm, rss_s, args = parts
+        if not pid_s.isdigit():
+            continue
+        pid = int(pid_s)
+        kind = classify(args, comm, pid)
+        if kind is None:
+            continue
+        rss_mb = round(int(rss_s) / 1024, 1) if rss_s.isdigit() else 0.0
+        if kind == "desktop":
+            desktop["procs"] += 1
+            desktop["rss_mb"] = round(desktop["rss_mb"] + rss_mb, 1)
+            continue
+        cwd, started = proc_cwd(pid), proc_start(pid)
+        unit = proc_unit(pid)
+        tr = transcript_for(cwd, started, args, claimed)
+        found.append({
+            "pid": pid, "kind": kind, "unit": unit,
+            "cwd": cwd, "project": os.path.basename(cwd) or cwd,
+            "started": started, "runtime_sec": round(now - started, 1) if started else None,
+            "rss_mb": rss_mb, "args": args[:200],
+            "transcript": tr,
+            "session_id": tr.get("session_id", ""),
+        })
+    found.sort(key=lambda p: (p["kind"] != "headless", -(p["runtime_sec"] or 0)))
+    if desktop["procs"]:
+        desktop["project"] = "Claude Desktop"
+        found.append(desktop)
+    return found
+
+
+# ── warden ───────────────────────────────────────────────────────────────────
+def warden_state() -> dict:
+    out = {"hook_wired": False, "budget": None, "recent": [], "incidents_open": 0}
+    jn = HOME / ".config/hypr/scripts/journal-notify.sh"
+    try:
+        t = jn.read_text(errors="ignore")
+        out["hook_wired"] = 'triage "$rule"' in t and "WARDEN" in t
+    except OSError:
+        pass
+    try:
+        st = json.loads((WARDEN_STATE / "state.json").read_text())
+        today = time.strftime("%Y-%m-%d")
+        out["budget"] = {"used": st.get("sessions", {}).get(today, 0), "cap": 6}
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    reports = WARDEN_STATE / "reports"
+    incidents = WARDEN_STATE / "incidents"
+    done = set()
+    if reports.is_dir():
+        for f in sorted(reports.glob("*.json"))[-8:]:
+            try:
+                r = json.loads(f.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            done.add(f.stem)
+            inc = r.get("incident", {})
+            verdict = "still failing" if r.get("verified") is False else r.get("verdict")
+            out["recent"].append({
+                "id": inc.get("id", f.stem),
+                "subject": inc.get("subject") or inc.get("unit") or "?",
+                "verdict": verdict, "summary": r.get("summary", ""),
+                "cost_usd": r.get("cost_usd"), "ts": inc.get("ts"),
+                "read_only": r.get("read_only"),
+                # What `claude --resume <id>` needs to reopen this run in the
+                # foreground. Older reports predate this being recorded.
+                "session_id": r.get("session_id") or "",
+                "cwd": r.get("cwd") or "",
+            })
+    out["recent"].reverse()
+    if incidents.is_dir():
+        incs = sorted(incidents.glob("*.json"))
+        out["incidents_open"] = sum(1 for f in incs if f.stem not in done)
+        if incs:
+            try:
+                out["last_incident_ts"] = json.loads(incs[-1].read_text()).get("ts")
+            except (OSError, ValueError):
+                pass
+    return out
+
+
+# ── unit inspection ──────────────────────────────────────────────────────────
+def unit_state(unit: str) -> dict:
+    rc, out = run(["systemctl", "--user", "show", unit, "--no-pager",
+                   "-p", "LoadState", "-p", "ActiveState", "-p", "SubState",
+                   "-p", "Result", "-p", "ExecMainStatus"])
+    return dict(l.split("=", 1) for l in out.strip().splitlines() if "=" in l)
+
+
+def MANAGER_CHATTER(line: str) -> bool:
+    """systemd's own narration about a unit, as it appears under `-o cat`."""
+    return line.startswith((
+        "Started", "Starting", "Stopping", "Stopped", "Finished",
+        "Failed to start", "Main process exited", "Consumed",
+        "Deactivated successfully", "Scheduled restart",
+    ))
+
+
+def last_outcome(unit: str) -> tuple[bool | None, str]:
+    """Did this unit's last COMPLETED run succeed, and why not.
+
+    `systemctl show` reports the instantaneous state, and while a oneshot is
+    mid-run that is ActiveState=activating with a stale Result=success. For a
+    unit on a 60s timer that fails every time, sampling catches it running often
+    enough to report it healthy — which is exactly the blind spot this tool is
+    supposed to close. The journal records what actually finished."""
+    rc, out = run(["journalctl", "--user", "-u", unit, "-n", "150",
+                   "--no-pager", "-o", "cat"], timeout=25)
+    if rc != 0 or not out.strip():
+        return None, ""
+    lines = out.splitlines()
+    for i in range(len(lines) - 1, -1, -1):
+        l = lines[i].strip()
+        if "Failed with result" in l or l.startswith("Failed to start"):
+            # The cause is whatever the PROCESS said just before systemd
+            # noticed; systemd's own lines only carry the exit code, and under
+            # `-o cat` they are unprefixed, so they must be excluded by shape.
+            for j in range(i - 1, max(-1, i - 14), -1):
+                prev = lines[j].strip()
+                if prev and not prev.startswith(unit) and not MANAGER_CHATTER(prev):
+                    return False, prev[:200]
+            return False, ""
+        if l.startswith("Finished ") or "Deactivated successfully" in l:
+            return True, ""
+    return None, ""
+
+
+def osd_jobs() -> list[dict]:
+    """Every osd sync timer, and what its service last actually did."""
+    rc, out = run(["systemctl", "--user", "list-unit-files", "--no-pager", "--plain"])
+    jobs_ = []
+    for line in out.splitlines():
+        name = line.split()[0] if line.split() else ""
+        if not (name.startswith("osd-") and name.endswith(".timer")):
+            continue
+        svc = name[:-len(".timer")] + ".service"
+        p_ = unit_state(svc)
+        ok, reason = last_outcome(svc)
+        if ok is None:
+            ok = p_.get("ActiveState") != "failed"
+        jobs_.append({"name": name[len("osd-"):-len(".timer")], "unit": svc,
+                      "ok": bool(ok), "state": p_.get("ActiveState", "?"),
+                      "running": p_.get("ActiveState") == "activating",
+                      "detail": reason})
+    return jobs_
+
+
+# ── triggers: what can START a background agent ──────────────────────────────
+# Only one thing on this machine actually launches an agent — journal-notify
+# hands an incident to warden, which runs `claude -p`. It is listed explicitly
+# rather than discovered, because "does this unit eventually run a Claude
+# agent" is not something you can tell by reading an ExecStart: every other
+# claude-* timer here manages Claude's artifacts (reaping processes, syncing
+# memory, garbage-collecting sessions) without ever starting one. Calling those
+# triggers would be a lie that hides the single one that matters.
+def triggers() -> list[dict]:
+    jn = unit_state("journal-notify.service")
+    jn_ok = jn.get("ActiveState") in ("active", "activating")
+    w = warden_state()
+    cfg = warden_config()
+
+    armed = jn_ok and w["hook_wired"] and cfg.get("enabled", True)
+    budget = w.get("budget") or {}
+    used, cap = budget.get("used", 0), budget.get("cap", cfg.get("max_sessions_per_day", 6))
+    if armed and cap and used >= cap:
+        armed = False
+
+    why = []
+    if not jn_ok:
+        why.append("journal-notify not running")
+    if not w["hook_wired"]:
+        why.append("hook missing from journal-notify.sh")
+    if not cfg.get("enabled", True):
+        why.append("disabled in warden config")
+    if cap and used >= cap:
+        why.append(f"daily cap reached ({used}/{cap})")
+
+    return [{
+        "name": "warden",
+        "via": "journal-notify.sh → warden triage",
+        "armed": armed,
+        "why": "; ".join(why),
+        "watches": cfg.get("triage_rules", []),
+        "authority": "can change files" if cfg.get("session_args") else "read-only",
+        "budget": {"used": used, "cap": cap},
+        "cooldown_min": cfg.get("cooldown_min", 360),
+        "last_fired": w.get("last_incident_ts"),
+        "model": cfg.get("model", "sonnet"),
+    }]
+
+
+def warden_config() -> dict:
+    try:
+        return json.loads((HOME / ".config/warden/config.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+# ── jobs: Claude housekeeping that does NOT start an agent ───────────────────
+# Kept separate from triggers on purpose. These are the scripts that keep Claude
+# tidy and its data in sync; when one breaks it is usually what generates the
+# incident a trigger then reacts to, so it belongs on the same screen — just not
+# in the same list.
+JOB_UNITS = [
+    ("journal-notify.service", "journal watcher", "watches every unit; feeds warden"),
+    ("claude-memory-sync.timer", "memory mirror", "syncs ~/.claude memory between hosts"),
+    ("claude-reaper.timer", "session reaper", "kills orphaned Claude processes"),
+    ("claude-vscode-session-gc.timer", "vscode session gc", "prunes editor session files"),
+    ("claude-status-push.timer", "status push", "ships this snapshot to the dashboard"),
+]
+
+
+def jobs() -> list[dict]:
+    out = []
+    for unit, label, what in JOB_UNITS:
+        p = unit_state(unit)
+        load = p.get("LoadState", "not-found")
+        if load == "not-found":
+            out.append({"name": label, "unit": unit, "what": what,
+                        "ok": False, "state": "not installed", "detail": ""})
+            continue
+        # For a timer, health is two separate facts: is the timer itself armed,
+        # and did its last run succeed. Reading ActiveState off the SERVICE is
+        # wrong — between runs a healthy oneshot is "inactive", which reads as
+        # broken; and reading it off the TIMER alone hides a service that fails
+        # every single time it fires.
+        is_timer = unit.endswith(".timer")
+        svc = unit[:-len(".timer")] + ".service" if is_timer else unit
+        ran_ok, reason = last_outcome(svc)
+        active = p.get("ActiveState", "?")
+        armed = active in ("active", "activating")
+        ok = armed and (ran_ok is not False)
+        if is_timer and not armed:
+            state, reason = "timer not enabled", reason or "never scheduled"
+        elif ran_ok is False:
+            state = "last run failed"
+        else:
+            state = "waiting" if is_timer else active
+        out.append({"name": label, "unit": unit, "what": what, "ok": bool(ok),
+                    "state": state, "detail": reason})
+
+    for j in osd_jobs():
+        out.append({"name": f"sync · {j['name']}", "unit": j["unit"],
+                    "what": "osync replica", "ok": j["ok"],
+                    "state": ("running" if j.get("running")
+                              else ("last run failed" if not j["ok"] else "in sync")),
+                    "detail": j["detail"]})
+    return out
+
+
+# ── assembly ─────────────────────────────────────────────────────────────────
+def snapshot() -> dict:
+    procs = processes()
+    agents_running = [p for p in procs if p.get("kind") == "headless"]
+    interactive = [p for p in procs if p.get("kind") in ("interactive", "ide")]
+    desktop = next((p for p in procs if p.get("kind") == "desktop"), None)
+    w = warden_state()
+    trg = triggers()
+    jb = jobs()
+
+    alerts = []
+    for t in trg:
+        if not t["armed"]:
+            alerts.append(f"trigger '{t['name']}' is NOT armed — {t['why']}")
+    for j in jb:
+        if not j["ok"]:
+            alerts.append(f"{j['name']}: {j['detail'] or j['state']}")
+    for a in agents_running:
+        idle = (a.get("transcript") or {}).get("idle_sec")
+        if idle is not None and idle > 300:
+            alerts.append(f"agent pid {a['pid']} silent for {int(idle // 60)}min")
+    if w.get("incidents_open"):
+        alerts.append(f"{w['incidents_open']} incident(s) with no agent run")
+
+    return {
+        "ts": time.time(),
+        "host": socket.gethostname(),
+        "user": pwd.getpwuid(UID).pw_name,
+        "agents": {"running": agents_running, "recent": w["recent"]},
+        "triggers": trg,
+        "jobs": jb,
+        "interactive": {"count": len(interactive), "procs": interactive,
+                        "desktop": desktop},
+        "alerts": alerts,
+        # kept so an older dashboard/plugin build still renders something
+        "headless": len(agents_running),
+    }
+
+
+# ── output ───────────────────────────────────────────────────────────────────
+DIM, R, BOLD = "\033[38;5;242m", "\033[0m", "\033[1m"
+GREEN, RED, AMBER = "\033[38;5;150m", "\033[38;5;203m", "\033[38;5;215m"
+
+
+def ago(sec) -> str:
+    if sec is None:
+        return "?"
+    sec = int(sec)
+    if sec < 60:
+        return f"{sec}s"
+    if sec < 3600:
+        return f"{sec // 60}m"
+    if sec < 86400:
+        return f"{sec // 3600}h{(sec % 3600) // 60:02d}"
+    return f"{sec // 86400}d"
+
+
+def human(snap: dict) -> int:
+    tty = sys.stdout.isatty()
+    c = (lambda s, col: f"{col}{s}{R}") if tty else (lambda s, col: s)
+
+    # 1. What can start an agent.
+    print(c("TRIGGERS", BOLD) + c("   what can start a background agent", DIM))
+    for t in snap["triggers"]:
+        mark = c("●", GREEN if t["armed"] else RED)
+        state = "armed" if t["armed"] else "NOT ARMED"
+        print(f"  {mark} {t['name']:10} {state:10} {t['via']}")
+        print(c(f"      watches {', '.join(t['watches']) or 'nothing'}", DIM))
+        print(c(f"      {t['authority']} · {t['model']} · budget "
+                f"{t['budget']['used']}/{t['budget']['cap']} today · "
+                f"cooldown {t['cooldown_min']}min", DIM))
+        if t["why"]:
+            print(c(f"      {t['why']}", RED))
+
+    # 2. Agents running right now.
+    running = snap["agents"]["running"]
+    print("\n" + c("AGENTS RUNNING", BOLD) + f"   {len(running)}")
+    if not running:
+        print(c("  none", DIM))
+    for a in running:
+        t = a.get("transcript") or {}
+        idle = t.get("idle_sec")
+        live = f"out {ago(idle)} ago" if idle is not None else "no transcript"
+        mark = c("●", GREEN if (idle is not None and idle < 120) else AMBER)
+        print(f"  {mark} pid {a['pid']:<8} {a['project'][:24]:24} "
+              f"up {ago(a['runtime_sec']):>5}  {a['rss_mb']:>7.1f}M  {live}")
+        if a.get("unit"):
+            print(c(f"      {a['unit']}", DIM))
+
+    # 3. What they concluded.
+    print("\n" + c("RECENT AGENT RUNS", BOLD))
+    rec = snap["agents"]["recent"]
+    if not rec:
+        print(c("  none yet", DIM))
+    for r in rec[:6]:
+        icon = {"fixed": "✓", "no-change": "·", "needs-human": "✋"}.get(r["verdict"], "?")
+        col = RED if r["verdict"] in ("needs-human", "still failing") else DIM
+        cost = f"${r['cost_usd']:.2f}" if r.get("cost_usd") else "—"
+        print(f"  {c(icon, col)} {r['subject'][:32]:32} {cost:>7}  {r['summary'][:48]}")
+
+    # 4. The housekeeping around Claude.
+    print("\n" + c("CLAUDE JOBS", BOLD) + c("   do not start agents", DIM))
+    for j in snap["jobs"]:
+        mark = c("✓" if j["ok"] else "✗", GREEN if j["ok"] else RED)
+        print(f"  {mark} {j['name'][:24]:24} {j['detail'] or j['state']}")
+
+    iv = snap["interactive"]
+    extra = f" · Claude Desktop {iv['desktop']['procs']} procs" if iv.get("desktop") else ""
+    print(c(f"\n{iv['count']} interactive session(s) open{extra} — not agents, "
+            f"you are looking at those.", DIM))
+
+    if snap["alerts"]:
+        print("\n" + c("NEEDS ATTENTION", BOLD))
+        for a in snap["alerts"]:
+            print(f"  {c('!', AMBER)} {a}")
+    return 0
+
+
+def push(snap: dict) -> int:
+    """Outbound-only, same shape and transport as push-usage.sh — the server
+    never reaches into the laptop."""
+    host = "ubuntu@100.122.63.6"
+    dest = f"Documents/Projects/dashboard/.cache_sources/claude-status-{snap['host']}.json"
+    payload = json.dumps(snap)
+    p = subprocess.run(
+        ["ssh", "-o", "ConnectTimeout=15", host,
+         f"mkdir -p $(dirname {dest}) && cat > {dest}.tmp && mv {dest}.tmp {dest}"],
+        input=payload, text=True, capture_output=True, timeout=60)
+    if p.returncode != 0:
+        sys.stderr.write(f"claude-status: push failed — {p.stderr.strip()[:200]}\n")
+        return 1
+    print(f"pushed {len(payload)} bytes -> {host}:{dest}")
+    return 0
+
+
+# ── following a live agent ───────────────────────────────────────────────────
+def find_transcript(session_id: str) -> Path | None:
+    for d in PROJECTS.iterdir() if PROJECTS.is_dir() else []:
+        f = d / f"{session_id}.jsonl"
+        if f.exists():
+            return f
+    return None
+
+
+def _render(rec: dict) -> str:
+    """One transcript line as something readable.
+
+    A running agent cannot be attached to — it is headless, there is no terminal
+    to join. Its transcript is the only live window into it, so this renders the
+    turns rather than the raw JSONL you would otherwise be squinting at."""
+    role = (rec.get("message") or {}).get("role") or rec.get("type") or ""
+    content = (rec.get("message") or {}).get("content")
+    parts = []
+    if isinstance(content, str):
+        parts.append(content)
+    elif isinstance(content, list):
+        for c in content:
+            if not isinstance(c, dict):
+                continue
+            if c.get("type") == "text":
+                parts.append(c["text"])
+            elif c.get("type") == "tool_use":
+                inp = c.get("input") or {}
+                hint = inp.get("command") or inp.get("file_path") or inp.get("pattern") or ""
+                parts.append(f"[{c.get('name')}] {str(hint)[:160]}")
+            elif c.get("type") == "tool_result":
+                body = c.get("content")
+                if isinstance(body, list):
+                    body = " ".join(b.get("text", "") for b in body if isinstance(b, dict))
+                parts.append(f"  → {str(body or '')[:300]}")
+    text = "\n".join(p for p in parts if p).strip()
+    if not text:
+        return ""
+    tag = {"user": "\033[38;5;215myou\033[0m",
+           "assistant": "\033[38;5;150magent\033[0m"}.get(role, role)
+    return f"{tag}  {text}"
+
+
+def follow(session_id: str) -> int:
+    f = find_transcript(session_id)
+    if not f:
+        sys.stderr.write(f"claude-status: no transcript for session {session_id}\n")
+        return 2
+    print(f"following {f}  (ctrl-c to stop)\n")
+    seen = 0
+    try:
+        while True:
+            try:
+                lines = f.read_text(errors="replace").splitlines()
+            except OSError:
+                break
+            for line in lines[seen:]:
+                try:
+                    out = _render(json.loads(line))
+                except (ValueError, TypeError):
+                    continue
+                if out:
+                    print(out + "\n")
+            seen = len(lines)
+            time.sleep(1.5)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if "-h" in args or "--help" in args:
+        print(Path(__file__).read_text().split("\n\n")[0]
+              .replace("#!/usr/bin/env python3\n", ""))
+        return 0
+    if "--follow" in args:
+        i = args.index("--follow")
+        if i + 1 >= len(args):
+            sys.stderr.write("claude-status: --follow needs a session id\n")
+            return 2
+        return follow(args[i + 1])
+    snap = snapshot()
+    if "--json" in args:
+        json.dump(snap, sys.stdout, indent=None if "--compact" in args else 2)
+        print()
+        return 0
+    if "--push" in args:
+        return push(snap)
+    return human(snap)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
