@@ -1,9 +1,0 @@
-[Unit]
-Description=nightshift harvester — ship changed-repo diffs to the server
-After=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/nightshift-harvest
-# never block shutdown/suspend on a slow ssh
-TimeoutStartSec=120
