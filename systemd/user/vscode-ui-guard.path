@@ -1,0 +1,16 @@
+[Unit]
+Description=Watch VS Code and its user settings for modern-UI opt-out drift
+
+[Path]
+# inotify, not polling. Two ways the opt-out breaks, one watch each:
+#
+# package.json is rewritten by every pacman upgrade of the `code` package -- the
+# moment a new build could rename the setting out from under us.
+PathChanged=/usr/share/code/resources/app/package.json
+# settings.json covers the other direction: the key being removed by a settings
+# sync, a profile switch, or a stray edit. VS Code rewrites this file whenever
+# any setting changes, so the guard is written to be a cheap no-op when healthy.
+PathChanged=%h/.config/Code/User/settings.json
+
+[Install]
+WantedBy=paths.target
