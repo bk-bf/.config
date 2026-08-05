@@ -177,6 +177,27 @@ Item {
     Quickshell.execDetached(["sh", "-c", root.binPath + " open --run " + _q(cmd) + " --cwd " + _q(cwd || "~") + " --term " + root.terminalCmd]);
   }
 
+  // Deletes move to a trash directory, so a misclick in a bar panel is a mv
+  // away from being undone. A script is disabled, never deleted.
+  function removeSession(sessionId) {
+    if (!sessionId)
+      return;
+    Quickshell.execDetached(["sh", "-c", root.binPath + " rm --session " + sessionId]);
+    refreshSoon.restart();
+  }
+  function removeRun(runId) {
+    if (!runId)
+      return;
+    Quickshell.execDetached(["sh", "-c", root.binPath + " rm --run " + _q(runId)]);
+    refreshSoon.restart();
+  }
+  function disableJob(unit) {
+    if (!unit)
+      return;
+    Quickshell.execDetached(["sh", "-c", root.binPath + " rm --job " + _q(unit)]);
+    refreshSoon.restart();
+  }
+
   function openScript(path) {
     if (!path)
       return;
@@ -255,6 +276,13 @@ Item {
     triggeredOnStart: true
     onTriggered: root.refresh()
   }
+  // A removal lands on disk a moment after the click; re-scan once it has.
+  Timer {
+    id: refreshSoon
+    interval: 900
+    onTriggered: root.refresh()
+  }
+
   // Re-evaluates the relative times in the tooltip without re-running the scan.
   Timer {
     interval: 10000

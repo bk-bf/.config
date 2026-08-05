@@ -8,6 +8,7 @@
 #   claude-status --follow <session-id>
 #                            tail a running agent's transcript, rendered readable
 #   claude-status open --follow <id>        open that follow in a terminal window
+#   claude-status rm --session <id> | --run <id> | --job <unit>
 #   claude-status open --resume <id> [--cwd DIR]
 #                            reopen a finished session interactively
 #
@@ -975,12 +976,77 @@ def cmd_open(args: list) -> int:
     return 2
 
 
+# ── removing things ──────────────────────────────────────────────────────────
+# A one-click delete in a bar panel must not be final, so a "deleted" session or
+# run is moved into a trash directory rather than unlinked. Recovering it is a
+# mv. A script is only ever DISABLED, never deleted: removing the file that a
+# systemd unit runs from a panel button is a footgun, and stopping the unit is
+# the reversible 90% of what "get rid of this" means.
+TRASH = Path(os.path.expanduser("~/.local/state/claude-status/trash"))
+
+
+def _trash(src: Path, tag: str) -> bool:
+    if not src.exists():
+        return False
+    TRASH.mkdir(parents=True, exist_ok=True)
+    dest = TRASH / f"{tag}-{int(time.time())}-{src.name}"
+    try:
+        src.rename(dest)
+        return True
+    except OSError:
+        try:
+            shutil.move(str(src), str(dest))
+            return True
+        except (OSError, shutil.Error):
+            return False
+
+
+def cmd_rm(args: list) -> int:
+    def opt(name):
+        i = args.index(name) if name in args else -1
+        return args[i + 1] if 0 <= i < len(args) - 1 else ""
+
+    if "--session" in args:
+        sid = opt("--session")
+        f = find_transcript(sid) if sid else None
+        if not f:
+            sys.stderr.write(f"claude-status: no transcript {sid}\n")
+            return 2
+        ok = _trash(f, "session")
+        print(f"{'moved to trash' if ok else 'could not remove'}: {f}")
+        return 0 if ok else 1
+
+    if "--run" in args:
+        rid = opt("--run")
+        n = 0
+        for d, tag in ((WATCHER_STATE / "reports", "report"),
+                       (WATCHER_STATE / "incidents", "incident")):
+            for f in d.glob(f"*{rid}*.json") if d.is_dir() else []:
+                n += _trash(f, tag)
+        print(f"moved {n} file(s) to trash")
+        return 0 if n else 1
+
+    if "--job" in args:
+        unit = opt("--job")
+        if not unit:
+            return 2
+        rc1, _ = run(["systemctl", "--user", "stop", unit], timeout=30)
+        rc2, out = run(["systemctl", "--user", "disable", unit], timeout=30)
+        print(f"disabled {unit}" if rc2 == 0 else f"could not disable {unit}: {out.strip()[:160]}")
+        return 0 if rc2 == 0 else 1
+
+    sys.stderr.write("claude-status: rm needs --session/--run/--job\n")
+    return 2
+
+
 def main() -> int:
     args = sys.argv[1:]
     if "-h" in args or "--help" in args:
         print(Path(__file__).read_text().split("\n\n")[0]
               .replace("#!/usr/bin/env python3\n", ""))
         return 0
+    if args and args[0] == "rm":
+        return cmd_rm(args[1:])
     if args and args[0] == "open":
         return cmd_open(args[1:])
     if "--follow" in args:

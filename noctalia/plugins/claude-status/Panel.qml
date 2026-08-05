@@ -282,6 +282,17 @@ Item {
             // terminal. A live session is never resumed: that would put a
             // second writer on its transcript.
             NIconButton {
+              icon: "trash"
+              baseSize: Style.baseWidgetSize * 0.5
+              enabled: !modelData.live
+              opacity: enabled ? 0.7 : 0.25
+              tooltipText: enabled ? "Delete this session" : "cannot delete a running session"
+              onClicked: {
+                if (svc)
+                  svc.removeSession(modelData.session_id);
+              }
+            }
+            NIconButton {
               icon: modelData.pane_id ? "arrow-right" : (modelData.live ? "eye" : "player-play")
               baseSize: Style.baseWidgetSize * 0.55
               tooltipText: modelData.pane_id ? "Jump to this session in herdr" : (modelData.live ? "Watch this session's output" : "Reopen in a terminal")
@@ -376,7 +387,7 @@ Item {
     // ── triage results ───────────────────────────────────────────────────────
     NText {
       visible: svc && svc.recent.length > 0
-      text: "TRIAGE RESULTS · what the trigger's agents concluded"
+      text: "TRIAGE RESULTS"
       pointSize: Style.fontSizeXS
       font.weight: Style.fontWeightSemiBold
       color: root.cMuted
@@ -413,6 +424,16 @@ Item {
               elide: Text.ElideRight
             }
             NIconButton {
+              icon: "trash"
+              baseSize: Style.baseWidgetSize * 0.5
+              opacity: 0.7
+              tooltipText: "Delete this result"
+              onClicked: {
+                if (svc)
+                  svc.removeRun(modelData.id);
+              }
+            }
+            NIconButton {
               icon: "player-play"
               baseSize: Style.baseWidgetSize * 0.55
               enabled: svc ? svc.canResume(modelData) : false
@@ -428,9 +449,9 @@ Item {
       }
     }
 
-    // ── pit crew ─────────────────────────────────────────────────────────────
+    // ── scripts ─────────────────────────────────────────────────────────────
     NText {
-      text: "PIT CREW · keeps things running, never starts an agent"
+      text: "SCRIPTS"
       pointSize: Style.fontSizeXS
       font.weight: Style.fontWeightSemiBold
       color: root.cMuted
@@ -475,6 +496,16 @@ Item {
                 font.weight: Style.fontWeightSemiBold
                 color: Color.mOnSurface
                 elide: Text.ElideRight
+              }
+              NIconButton {
+                icon: "trash"
+                baseSize: Style.baseWidgetSize * 0.5
+                opacity: 0.7
+                tooltipText: "Stop and disable this script"
+                onClicked: {
+                  if (svc)
+                    svc.disableJob(modelData.unit);
+                }
               }
               NIconButton {
                 icon: "edit"
