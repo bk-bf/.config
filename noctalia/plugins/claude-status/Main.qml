@@ -158,6 +158,16 @@ Item {
     Quickshell.execDetached(["sh", "-c", root.binPath + " open --resume " + sessionId + extra + " --term " + root.terminalCmd]);
   }
 
+  function openHerdr(cwd, name) {
+    Quickshell.execDetached(["sh", "-c", root.binPath + " open --herdr " + _q(name || "claude") + " --cwd " + _q(cwd || "~") + " --term " + root.terminalCmd]);
+  }
+
+  function openScript(path) {
+    if (!path)
+      return;
+    Quickshell.execDetached(["sh", "-c", root.binPath + " open --edit " + _q(path) + " --term " + root.terminalCmd]);
+  }
+
   // Anything the agent already finished can be reopened; a live one cannot.
   function canResume(r) {
     return !!(r && r.session_id);

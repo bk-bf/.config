@@ -366,6 +366,45 @@ def slug_to_path(slug: str) -> str:
     return path
 
 
+def session_title(f: Path) -> str:
+    """A human label for a session.
+
+    Claude Code does not write a title into the transcript, so derive one from
+    the first thing asked. Without this every row is a hex id and you cannot
+    tell which session is which — which is the whole point of listing them."""
+    try:
+        with open(f, errors="replace") as fh:
+            for _ in range(400):
+                line = fh.readline()
+                if not line:
+                    break
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if r.get("type") == "summary" and r.get("summary"):
+                    return str(r["summary"])[:80]
+                if r.get("type") != "user":
+                    continue
+                c = (r.get("message") or {}).get("content")
+                text = ""
+                if isinstance(c, str):
+                    text = c
+                elif isinstance(c, list):
+                    for x in c:
+                        if isinstance(x, dict) and x.get("type") == "text":
+                            text = x["text"]
+                            break
+                text = " ".join(text.split())
+                # Skip the harness preamble so the label is the actual ask.
+                if not text or text.startswith(("<", "Caveat:", "[Request")):
+                    continue
+                return text[:80]
+    except OSError:
+        pass
+    return ""
+
+
 def recent_sessions(limit: int = 10, live_ids: set | None = None) -> list[dict]:
     """The newest transcripts across every project.
 
@@ -396,6 +435,7 @@ def recent_sessions(limit: int = 10, live_ids: set | None = None) -> list[dict]:
                 "age_sec": round(time.time() - st.st_mtime, 1),
                 "size_kb": round(st.st_size / 1024, 1),
                 "live": f.stem in live_ids,
+                "title": session_title(f),
             })
     out.sort(key=lambda r: -r["mtime"])
     return out[:limit]
@@ -491,6 +531,13 @@ JOB_UNITS = [
 ]
 
 
+def unit_script(unit: str) -> str:
+    """The file a unit actually runs, so a card can open it in an editor."""
+    rc, out = run(["systemctl", "--user", "show", unit, "-p", "ExecStart", "--value"])
+    m = re.search(r"path=([^ ;]+)", out or "")
+    return m.group(1) if m else ""
+
+
 def jobs() -> list[dict]:
     out = []
     for unit, label, what in JOB_UNITS:
@@ -518,10 +565,11 @@ def jobs() -> list[dict]:
         else:
             state = "waiting" if is_timer else active
         out.append({"name": label, "unit": unit, "what": what, "ok": bool(ok),
-                    "state": state, "detail": reason})
+                    "state": state, "detail": reason, "script": unit_script(svc)})
 
     for j in osd_jobs():
         out.append({"name": f"sync · {j['name']}", "unit": j["unit"],
+                    "script": unit_script(j["unit"]),
                     "what": "osync replica", "ok": j["ok"],
                     "state": ("running" if j.get("running")
                               else ("last run failed" if not j["ok"] else "in sync")),
@@ -824,7 +872,24 @@ def cmd_open(args: list) -> int:
         claude = shutil.which("claude") or str(HOME / ".local/bin/claude")
         return spawn_terminal(f"cd {cwd!r} && exec {claude!r} --resume {sid}", prefer)
 
-    sys.stderr.write("claude-status: open needs --follow <id> or --resume <id>\n")
+    if "--herdr" in args:
+        # herdr has no "run this command in a new session" flag, so this opens a
+        # herdr workspace in the session's directory rather than pretending to
+        # attach to the specific Claude run.
+        cwd = opt("--cwd") or str(HOME)
+        name = opt("--herdr") or os.path.basename(cwd.rstrip("/")) or "claude"
+        herdr = shutil.which("herdr") or str(HOME / ".local/bin/herdr")
+        return spawn_terminal(f"cd {cwd!r} && exec {herdr!r} --session {name}", prefer)
+
+    if "--edit" in args:
+        path = opt("--edit")
+        if not path:
+            sys.stderr.write("claude-status: open --edit needs a path\n")
+            return 2
+        editor = os.environ.get("EDITOR") or shutil.which("nvim") or "vi"
+        return spawn_terminal(f"exec {editor} {path!r}", prefer)
+
+    sys.stderr.write("claude-status: open needs --follow/--resume/--herdr/--edit\n")
     return 2
 
 

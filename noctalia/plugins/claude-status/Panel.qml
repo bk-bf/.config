@@ -296,10 +296,19 @@ Item {
               baseSize: Style.baseWidgetSize * 0.55
               enabled: !!modelData.session_id
               opacity: enabled ? 1 : 0.35
-              tooltipText: "Follow this agent's output"
+              tooltipText: "Watch this agent's output in a terminal"
               onClicked: {
                 if (svc)
                   svc.followAgent(modelData.session_id);
+              }
+            }
+            NIconButton {
+              icon: "layout-columns"
+              baseSize: Style.baseWidgetSize * 0.55
+              tooltipText: "Open a herdr workspace here"
+              onClicked: {
+                if (svc)
+                  svc.openHerdr(modelData.cwd, modelData.project);
               }
             }
           }
@@ -350,18 +359,23 @@ Item {
               radius: 4
               color: modelData.live ? Color.mPrimary : root.cMuted
             }
-            NText {
+            ColumnLayout {
               Layout.fillWidth: true
-              text: modelData.project || "?"
-              pointSize: Style.fontSizeS
-              color: modelData.exists ? Color.mOnSurface : root.cMuted
-              elide: Text.ElideMiddle
-            }
-            NText {
-              text: modelData.session_id ? modelData.session_id.substring(0, 8) : ""
-              pointSize: Style.fontSizeXS
-              color: root.cMuted
-              font.family: "monospace"
+              spacing: 0
+              NText {
+                Layout.fillWidth: true
+                text: modelData.title && modelData.title !== "" ? modelData.title : (modelData.session_id || "").substring(0, 8)
+                pointSize: Style.fontSizeXS
+                color: modelData.exists ? Color.mOnSurface : root.cMuted
+                elide: Text.ElideRight
+              }
+              NText {
+                Layout.fillWidth: true
+                text: modelData.project || "?"
+                pointSize: Style.fontSizeXS
+                color: root.cMuted
+                elide: Text.ElideMiddle
+              }
             }
             NText {
               text: svc ? svc.fmtAgo(modelData.age_sec) : ""
@@ -383,6 +397,15 @@ Item {
                   svc.followAgent(modelData.session_id);
                 else
                   svc.resumeSession(modelData.session_id, modelData.cwd);
+              }
+            }
+            NIconButton {
+              icon: "layout-columns"
+              baseSize: Style.baseWidgetSize * 0.55
+              tooltipText: "Open a herdr workspace here"
+              onClicked: {
+                if (svc)
+                  svc.openHerdr(modelData.cwd, modelData.project);
               }
             }
           }
@@ -469,73 +492,102 @@ Item {
                   svc.resumeSession(modelData.session_id, modelData.cwd);
               }
             }
-            NIconButton {
-              icon: "external-link"
-              baseSize: Style.baseWidgetSize * 0.55
-              tooltipText: "Open the full report"
-              onClicked: {
-                if (svc)
-                  svc.openReport(modelData.id);
-              }
-            }
+
           }
         }
       }
     }
 
-    // ── 5. jobs ──────────────────────────────────────────────────────────────
+    // ── 5. pit crew ──────────────────────────────────────────────────────────
+    // The scripts that keep Claude tidy and its data in sync. They never start
+    // an agent — kept visually distinct from TRIGGERS for exactly that reason.
     NText {
-      text: "CLAUDE JOBS · do not start agents"
+      text: "PIT CREW · keeps things running, never starts an agent"
       pointSize: Style.fontSizeXS
       font.weight: Style.fontWeightSemiBold
       color: root.cMuted
     }
 
-    NBox {
-      Layout.fillWidth: true
-      forceOpaque: true
-      implicitHeight: jobCol.implicitHeight + Style.marginM * 2
+    Repeater {
+      model: svc ? svc.jobs : []
+      delegate: NBox {
+        Layout.fillWidth: true
+        forceOpaque: true
+        implicitHeight: jobRow.implicitHeight + Style.marginM * 2
 
-      ColumnLayout {
-        id: jobCol
-        anchors.fill: parent
-        anchors.margins: Style.marginM
-        spacing: Style.marginXS
+        ColumnLayout {
+          id: jobRow
+          anchors.fill: parent
+          anchors.margins: Style.marginM
+          spacing: 2
 
-        Repeater {
-          model: svc ? svc.jobs : []
-          delegate: RowLayout {
+          RowLayout {
             Layout.fillWidth: true
             spacing: Style.marginS
+
             NText {
-              text: modelData.ok ? "✓" : "✗"
-              color: modelData.ok ? Color.mPrimary : Color.mError
-              pointSize: Style.fontSizeXS
-              Layout.preferredWidth: 14
-            }
-            ColumnLayout {
               Layout.fillWidth: true
-              spacing: 0
-              NText {
-                Layout.fillWidth: true
-                text: modelData.name
-                pointSize: Style.fontSizeXS
-                color: Color.mOnSurface
-              }
-              NText {
-                Layout.fillWidth: true
-                visible: !modelData.ok && modelData.detail
-                text: modelData.detail || ""
-                pointSize: Style.fontSizeXS
-                color: Color.mError
-                wrapMode: Text.WordWrap
+              text: modelData.name
+              pointSize: Style.fontSizeS
+              font.weight: Style.fontWeightSemiBold
+              color: Color.mOnSurface
+              elide: Text.ElideRight
+            }
+
+            // Status pill — green when healthy, red when its last run failed.
+            Rectangle {
+              implicitHeight: pillText.implicitHeight + 4
+              implicitWidth: pillText.implicitWidth + Style.marginM
+              radius: height / 2
+              color: modelData.ok ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18) : Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)
+              border.width: 1
+              border.color: modelData.ok ? Color.mPrimary : Color.mError
+
+              RowLayout {
+                anchors.centerIn: parent
+                spacing: 4
+                Rectangle {
+                  implicitWidth: 6
+                  implicitHeight: 6
+                  radius: 3
+                  color: modelData.ok ? Color.mPrimary : Color.mError
+                }
+                NText {
+                  id: pillText
+                  text: modelData.ok ? "online" : "failing"
+                  pointSize: Style.fontSizeXS
+                  color: modelData.ok ? Color.mPrimary : Color.mError
+                }
               }
             }
-            NText {
-              text: modelData.state || ""
-              pointSize: Style.fontSizeXS
-              color: root.cMuted
+
+            NIconButton {
+              icon: "edit"
+              baseSize: Style.baseWidgetSize * 0.55
+              enabled: !!modelData.script
+              opacity: enabled ? 1 : 0.3
+              tooltipText: modelData.script ? ("Edit " + modelData.script) : "no script for this unit"
+              onClicked: {
+                if (svc)
+                  svc.openScript(modelData.script);
+              }
             }
+          }
+
+          NText {
+            Layout.fillWidth: true
+            text: modelData.what || ""
+            pointSize: Style.fontSizeXS
+            color: root.cMuted
+            wrapMode: Text.WordWrap
+          }
+          NText {
+            Layout.fillWidth: true
+            visible: !modelData.ok && modelData.detail
+            text: modelData.detail || ""
+            pointSize: Style.fontSizeXS
+            color: Color.mError
+            wrapMode: Text.WordWrap
           }
         }
       }
