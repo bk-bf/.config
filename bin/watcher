@@ -304,8 +304,8 @@ def git_restore_point(cwd: str) -> dict:
     whatever was already in progress there. If the tree was clean, HEAD is
     already that point.
 
-    This replaces the snapper bracket: snapshots only existed on the laptop,
-    and every project an agent touches is a git repo on both machines."""
+    Snapshots only ever existed on the laptop; every project an agent touches
+    is a git repo on both machines."""
     rc, _ = run(["git", "-C", cwd, "rev-parse", "--git-dir"], timeout=15)
     if rc != 0:
         return {"repo": False}
@@ -317,8 +317,14 @@ def git_restore_point(cwd: str) -> dict:
         rc2, out = run(["git", "-C", cwd, "stash", "create"], timeout=30)
         if rc2 == 0:
             stash = out.strip().splitlines()[-1].strip() if out.strip() else ""
+    # Neither `git checkout` nor a stash accounts for files that did not exist
+    # yet, so the ones present beforehand are listed: anything untracked that
+    # appears during the run was created by the agent and can be removed.
+    _, untracked = run(["git", "-C", cwd, "ls-files", "--others",
+                        "--exclude-standard"], timeout=20)
     return {"repo": True, "head": head.strip(), "dirty_before": dirty,
-            "stash": stash, "cwd": cwd}
+            "stash": stash, "cwd": cwd,
+            "untracked_before": sorted(untracked.split())}
 
 
 def is_restartable(unit: str) -> bool:
@@ -396,10 +402,8 @@ def parse_session_output(raw: str) -> tuple[str, float | None, str]:
 def changed_files(cwd: str) -> dict:
     """What a run actually touched.
 
-    The snapper bracket only exists on the laptop — the server is ext4 — so
-    trackability cannot rest on snapshots alone. A git status in the working
-    directory works on every host and answers the question that matters after
-    an unattended run: what is different now."""
+    A git status in the working directory works on every host and answers the
+    question that matters after an unattended run: what is different now."""
     rc, out = run(["git", "-C", cwd, "status", "--porcelain"], timeout=20)
     if rc != 0:
         return {"repo": False, "files": []}
@@ -571,7 +575,7 @@ def cmd_report(inc_id: str) -> int:
 
 def cmd_doctor(cfg: dict) -> int:
     ok = True
-    for tool in ("journalctl", "systemd-run", "notify-send", "snapper"):
+    for tool in ("journalctl", "systemd-run", "notify-send", "git"):
         found = shutil.which(tool)
         print(f"{'✓' if found else '✗'} {tool:14} {found or 'MISSING'}")
         ok &= bool(found)
@@ -585,8 +589,7 @@ def cmd_doctor(cfg: dict) -> int:
     if rc != 0:
         rc = 0 if run(["pgrep", "-f", "journal-notify.sh"], timeout=10)[0] == 0 else 1
     print(f"{'✓' if rc == 0 else '✗'} journal-notify is running")
-    rc, _ = run(["snapper", "-c", "home", "list"], timeout=20)
-    print(f"{'✓' if rc == 0 else '✗'} snapper 'home' config readable unprivileged")
+    print("· safety net: git — a restore point is taken per run, `watcher undo <id>`")
 
     print(f"\nconfig    {CONFIG}{'' if CONFIG.exists() else '  (using defaults)'}")
     print(f"state     {STATE_DIR}")
@@ -607,6 +610,64 @@ def cmd_test(cfg: dict) -> int:
     return 0
 
 
+def cmd_undo(cfg: dict, inc_id: str, confirm: bool) -> int:
+    """Put a repo back the way it was before a run.
+
+    Two steps, because there are two kinds of change to undo: whatever the agent
+    altered since the restore point, and whatever was already in progress there
+    before it started. Shows the damage and stops unless told to go ahead —
+    reverting a working tree is not something to do on a typo."""
+    matches = sorted(REPORTS.glob(f"*{inc_id}*.json"))
+    if not matches:
+        sys.stderr.write(f"watcher: no report for '{inc_id}'\n")
+        return 2
+    r = json.loads(matches[-1].read_text())
+    rest = r.get("restore") or {}
+    if not rest.get("repo"):
+        sys.stderr.write("watcher: that run had no git restore point "
+                         "(it changed nothing, or its directory is not a repo)\n")
+        return 1
+
+    cwd = rest.get("cwd") or (r.get("incident") or {}).get("cwd") or ""
+    rc, diff = run(["git", "-C", cwd, "status", "--porcelain"], timeout=20)
+    if rc != 0:
+        sys.stderr.write(f"watcher: {cwd} is not readable as a repo\n")
+        return 1
+
+    print(f"repo      {cwd}")
+    print(f"restore   {rest['head'][:12]}"
+          + (f" + stashed work {rest['stash'][:12]}" if rest.get("stash") else ""))
+    print("current changes:")
+    print("  " + "\n  ".join(diff.strip().splitlines() or ["(clean)"]))
+
+    if not confirm:
+        print(f"\nThis discards the changes above and restores the pre-run tree.")
+        print(f"Run it for real with:  watcher undo {inc_id} --yes")
+        return 0
+
+    run(["git", "-C", cwd, "checkout", "--", "."], timeout=60)
+    # Remove only what appeared during the run — never anything that was
+    # already lying around untracked before it started.
+    _, now_untracked = run(["git", "-C", cwd, "ls-files", "--others",
+                            "--exclude-standard"], timeout=20)
+    before = set(rest.get("untracked_before") or [])
+    for rel in sorted(set(now_untracked.split()) - before):
+        try:
+            (Path(cwd) / rel).unlink()
+            print(f"  removed {rel}")
+        except OSError:
+            pass
+    if rest.get("stash"):
+        rc2, out = run(["git", "-C", cwd, "stash", "apply", rest["stash"]], timeout=60)
+        if rc2 != 0:
+            sys.stderr.write(f"watcher: tracked files restored, but re-applying the "
+                             f"in-progress work failed:\n{out.strip()[:300]}\n"
+                             f"It is still recoverable: git stash apply {rest['stash']}\n")
+            return 1
+    print("reverted.")
+    return 0
+
+
 def main() -> int:
     args = sys.argv[1:]
     cfg = load_config()
@@ -624,6 +685,8 @@ def main() -> int:
         return cmd_fix(cfg, rest[0]) if rest else 2
     if cmd == "status":
         return cmd_status(cfg)
+    if cmd == "undo":
+        return cmd_undo(cfg, rest[0], "--yes" in rest) if rest else 2
     if cmd == "report":
         return cmd_report(rest[0]) if rest else 2
     if cmd == "test":
