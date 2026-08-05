@@ -110,7 +110,16 @@ Hard limits for this session:
 - Never `git push`, and never touch a repo other than the one this failure
   lives in.
 - Change as little as possible. A one-line config fix beats a refactor.
-- If the right answer is "this needs a human", say so and change nothing.
+
+Reply needs-human and change nothing in exactly two cases:
+  1. It needs root. There is no sudo available here; do not try to obtain it.
+  2. It is genuinely sketchy — it would destroy data whose reproducibility you
+     cannot verify, it touches secrets or credentials, it reaches outside the
+     failing unit's own project, or you are guessing at the cause rather than
+     knowing it.
+
+Ordinary breakage — a wrong path, a stale value, a bad flag, a permission on a
+file you own — is not one of those two cases.
 """
 
 
@@ -311,7 +320,9 @@ def is_restartable(unit: str) -> bool:
 def build_prompt(inc: dict, ctx: str, may_change: bool) -> str:
     hint = f"\nWhat is known about this failure:\n{inc['hint']}\n" if inc.get("hint") else ""
     mandate = (
-        "Diagnose it and apply the fix if the fix is clear and safe."
+        "Diagnose it and apply the fix. Reporting a fix you did not apply is "
+        "the failure mode here — the two escalation cases below are the only "
+        "reasons to hand it back."
         if may_change else
         "Diagnose it. You are running read-only: describe the fix precisely — "
         "exact files, exact edits, exact commands — but do not apply it."
@@ -364,6 +375,21 @@ def parse_session_output(raw: str) -> tuple[str, float | None, str]:
             if isinstance(item, dict) and item.get("type") == "result":
                 return _from(item)
     return raw.strip(), None, ""
+
+
+def changed_files(cwd: str) -> dict:
+    """What a run actually touched.
+
+    The snapper bracket only exists on the laptop — the server is ext4 — so
+    trackability cannot rest on snapshots alone. A git status in the working
+    directory works on every host and answers the question that matters after
+    an unattended run: what is different now."""
+    rc, out = run(["git", "-C", cwd, "status", "--porcelain"], timeout=20)
+    if rc != 0:
+        return {"repo": False, "files": []}
+    files = [l.strip() for l in out.splitlines() if l.strip()][:40]
+    _, stat = run(["git", "-C", cwd, "diff", "--stat"], timeout=20)
+    return {"repo": True, "files": files, "diffstat": stat.strip()[:1500]}
 
 
 def cmd_fix(cfg: dict, inc_id: str) -> int:
@@ -432,6 +458,7 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
 
     report = {
         "incident": inc, "verdict": verdict, "summary": summary,
+        "changed": changed_files(cwd),
         "verified": verified, "cost_usd": cost, "read_only": not may_change,
         "session_id": session_id, "cwd": cwd,
         "snapshot_pre": pre, "snapshot_post": post,
