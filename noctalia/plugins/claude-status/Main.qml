@@ -27,7 +27,7 @@ Item {
   readonly property bool hideWhenIdle: (cfg && cfg.hideWhenIdle) === true
   readonly property string terminalCmd: String((cfg && cfg.terminalCmd) || "kitty").trim()
 
-  readonly property string command: binPath + " --json --compact"
+  readonly property string command: binPath + " --json --compact --all"
 
   // ── state ───────────────────────────────────────────────────────────────────
   property var payload: null
@@ -195,6 +195,17 @@ Item {
     if (!unit)
       return;
     Quickshell.execDetached(["sh", "-c", root.binPath + " rm --job " + _q(unit)]);
+    refreshSoon.restart();
+  }
+
+  // Hand an alert to a triage agent by hand. The automatic path only covers
+  // what journal-notify raises; this covers everything else the panel knows
+  // about, including a failure on another machine.
+  function triageAlert(rule, subject, body) {
+    if (!subject)
+      return;
+    Quickshell.execDetached(["sh", "-c",
+      "~/.local/bin/watcher triage " + _q(rule || "unitfail") + " " + _q(subject) + " " + _q(body || subject)]);
     refreshSoon.restart();
   }
 

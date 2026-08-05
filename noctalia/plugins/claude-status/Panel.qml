@@ -34,6 +34,7 @@ Item {
   readonly property color cMuted: Color.mOnSurfaceVariant
   property bool showAllSessions: false
   property bool showAlerts: false
+  property var openAlert: ({})     // headline -> detail expanded
 
   readonly property int sessionCount: svc ? svc.sessions.length : 0
   readonly property var shownSessions: {
@@ -225,21 +226,66 @@ Item {
 
         Repeater {
           model: svc ? svc.alerts : []
-          delegate: RowLayout {
+          delegate: ColumnLayout {
             Layout.fillWidth: true
-            spacing: Style.marginS
-            Rectangle {
-              Layout.alignment: Qt.AlignVCenter
-              implicitWidth: 6
-              implicitHeight: 6
-              radius: 3
-              color: Color.mError
+            spacing: 1
+
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.marginS
+
+              Rectangle {
+                Layout.alignment: Qt.AlignVCenter
+                implicitWidth: 6
+                implicitHeight: 6
+                radius: 3
+                color: Color.mError
+              }
+              // Which machine. Without it a server failing all night is
+              // indistinguishable from the laptop clearing its throat.
+              NText {
+                text: modelData.host || "?"
+                pointSize: Style.fontSizeXS
+                color: root.cMuted
+                font.weight: Style.fontWeightSemiBold
+              }
+              NText {
+                Layout.fillWidth: true
+                text: (modelData.detail ? (root.openAlert[modelData.headline] ? "▾ " : "▸ ") : "") + (modelData.headline || "")
+                pointSize: Style.fontSizeXS
+                color: Color.mOnSurface
+                elide: Text.ElideRight
+
+                MouseArea {
+                  anchors.fill: parent
+                  enabled: !!modelData.detail
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    var o = root.openAlert;
+                    o[modelData.headline] = !o[modelData.headline];
+                    root.openAlert = o;
+                  }
+                }
+              }
+              NIconButton {
+                icon: "brain"
+                baseSize: Style.baseWidgetSize * 0.5
+                enabled: modelData.triageable === true
+                opacity: enabled ? 0.85 : 0.25
+                tooltipText: modelData.triageable ? "Hand this to a triage agent" : "needs root — an agent cannot fix this"
+                onClicked: {
+                  if (svc)
+                    svc.triageAlert(modelData.rule, modelData.subject, modelData.headline + " — " + (modelData.detail || ""));
+                }
+              }
             }
             NText {
               Layout.fillWidth: true
-              text: modelData
+              Layout.leftMargin: Style.marginM
+              visible: root.openAlert[modelData.headline] === true && modelData.detail
+              text: modelData.detail || ""
               pointSize: Style.fontSizeXS
-              color: Color.mOnSurface
+              color: root.cMuted
               wrapMode: Text.WordWrap
             }
           }

@@ -811,6 +811,49 @@ def failed_units() -> list[dict]:
     return out_rows
 
 
+# ── other machines ───────────────────────────────────────────────────────────
+DASHBOARD_URL = "https://dashboard.callmedaddy.dedyn.io/api/agents"
+
+
+def remote_alerts(this_host: str) -> list:
+    """Alerts from every OTHER machine, via the dashboard everything pushes to.
+
+    Without this the bar only ever reports the laptop, and a server that has
+    been failing all night looks exactly like a server that is fine. Best
+    effort: the dashboard being unreachable must never delay a local scan."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(DASHBOARD_URL, timeout=6) as r:
+            data = json.loads(r.read().decode())
+    except Exception:  # noqa: BLE001 — offline is normal, not an error
+        return []
+    out = []
+    for h in data.get("hosts", []):
+        if h.get("host") == this_host:
+            continue
+        stale = h.get("stale")
+        for a in h.get("alerts", []):
+            if isinstance(a, dict):
+                a.setdefault("host", h.get("host", "?"))
+                out.append(a)
+            else:
+                out.append({"host": h.get("host", "?"), "headline": str(a),
+                            "detail": "", "rule": "unitfail",
+                            "subject": str(a), "triageable": False})
+        if stale:
+            out.append({"host": h.get("host", "?"),
+                        "headline": "has stopped reporting",
+                        "detail": f"No snapshot for {int((h.get('age_sec') or 0)//60)} "
+                                  f"minutes. It may be asleep, off the tailnet, or its "
+                                  f"push timer may have stopped.",
+                        "rule": "unitfail", "subject": h.get("host", "?"),
+                        "triageable": False, "remote": True})
+    for a in out:
+        a["remote"] = True
+    return out
+
+
+
 def snapshot() -> dict:
     procs = processes()
     agents_running = [p for p in procs if p.get("kind") == "headless"]
@@ -820,28 +863,67 @@ def snapshot() -> dict:
     trg = triggers()
     jb = jobs()
 
+    # Alerts are objects, not sentences. A bar panel needs three separable
+    # things from each one: which machine it is about, a one-line headline, and
+    # the detail behind it that stays folded away until asked for. It also needs
+    # to know what to hand a triage agent, which a formatted string has thrown
+    # away by the time anything reads it.
+    host = socket.gethostname()
+
+    def alert(headline, detail="", rule="unitfail", subject="", fixable=True):
+        return {"host": host, "headline": headline, "detail": detail,
+                "rule": rule, "subject": subject or headline, "triageable": fixable}
+
     alerts = []
     for t in trg:
         if not t["armed"]:
-            alerts.append(f"trigger '{t['name']}' is NOT armed — {t['why']}")
+            alerts.append(alert(
+                f"nothing is armed to start an agent on {host}",
+                t["why"] + ". Until this is fixed, failures here are recorded "
+                           "but nothing acts on them.",
+                rule="unitfail", subject=t["name"], fixable=False))
     for j in jb:
         if not j["ok"]:
-            alerts.append(f"{j['name']}: {j.get('problem') or j['state']}")
+            alerts.append(alert(
+                f"{j['name']} is failing",
+                (j.get("problem") or j["state"]) +
+                (f"\n\nUnit: {j['unit']}" if j.get("unit") else "") +
+                (f"\nScript: {j['script']}" if j.get("script") else ""),
+                rule="osd" if j["name"].startswith("sync") else "unitfail",
+                subject=j.get("unit") or j["name"]))
     for a in agents_running:
         idle = (a.get("transcript") or {}).get("idle_sec")
         if idle is not None and idle > 300:
-            alerts.append(f"agent pid {a['pid']} silent for {int(idle // 60)}min")
+            alerts.append(alert(
+                f"an agent has produced nothing for {int(idle // 60)} minutes",
+                f"pid {a['pid']} in {a.get('project') or '?'} is still running and "
+                f"holding {a.get('rss_mb', 0)}MB, but its transcript has not grown. "
+                f"It is probably wedged.",
+                subject=a.get("unit") or f"pid {a['pid']}", fixable=False))
     dead = deprecated_names()
     ctr = containers()
     for c in ctr:
         c["deprecated"] = c["name"] in dead
         if not c["ok"] and not c["deprecated"]:
-            alerts.append(f"container {c['name']}: {c['problem']}")
+            alerts.append(alert(f"container {c['name']} is unhealthy",
+                                c["problem"], subject=c["name"]))
     fu = failed_units()
     for u in fu:
         u["deprecated"] = u["unit"] in dead or u["unit"].split(".")[0] in dead
-        if not u["deprecated"]:
-            alerts.append(f"unit {u['unit']} failed ({u['scope']})")
+        if u["deprecated"]:
+            continue
+        _, why = last_outcome(u["unit"]) if u["scope"] == "user" else (None, "")
+        alerts.append(alert(
+            f"{u['unit']} failed",
+            (why or "No reason recorded in the journal.") +
+            f"\n\nScope: {u['scope']}. "
+            + ("Fixing a system unit needs root, so an agent will hand it back."
+               if u["scope"] == "system" else
+               "Inspect with: journalctl --user -u " + u["unit"]),
+            subject=u["unit"], fixable=u["scope"] == "user"))
+
+    if "--all" in sys.argv:
+        alerts += remote_alerts(host)
 
     live_ids = {a.get("session_id") for a in agents_running if a.get("session_id")}
     return {
@@ -939,7 +1021,9 @@ def human(snap: dict) -> int:
     if snap["alerts"]:
         print("\n" + c("NEEDS ATTENTION", BOLD))
         for a in snap["alerts"]:
-            print(f"  {c('!', AMBER)} {a}")
+            print(f"  {c('!', AMBER)} [{a['host']}] {a['headline']}")
+            if a.get("detail"):
+                print(c("      " + a["detail"].splitlines()[0][:110], DIM))
     return 0
 
 
