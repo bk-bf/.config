@@ -44,6 +44,7 @@ Item {
   readonly property var jobs: (payload && payload.jobs) || []
   readonly property var alerts: (payload && payload.alerts) || []
   readonly property var interactive: (payload && payload.interactive) || null
+  readonly property var sessions: (payload && payload.sessions) || []
 
   readonly property int runningCount: running.length
 
@@ -135,22 +136,26 @@ Item {
 
   // Bring a session into the foreground.
   //
-  // A RUNNING agent cannot be attached to: it is headless, there is no terminal
-  // to join, and `--resume` on a live session id would put a second writer on
-  // the same transcript. So a running agent gets "follow" — its transcript
-  // tailed and rendered — and only a finished one gets "resume", which opens it
-  // as a real interactive session you can carry on typing into.
+  // Both go through `claude-status open`, which owns terminal detection. That
+  // used to be built here as `<term> -e sh -c ...`, which silently did nothing
+  // under kitty — kitty has no -e flag, its form is `kitty [options] program`.
+  // Keeping it in the CLI means it can be run and fixed from a shell instead of
+  // guessed at through the bar.
+  //
+  // A RUNNING agent cannot be resumed: it is headless, there is no terminal to
+  // join, and --resume on a live id would put a second writer on its
+  // transcript. So live gets follow, finished gets resume.
   function followAgent(sessionId) {
     if (!sessionId)
       return;
-    Quickshell.execDetached(["sh", "-c", root.terminalCmd + " -e sh -c " + _q(root.binPath + " --follow " + sessionId)]);
+    Quickshell.execDetached(["sh", "-c", root.binPath + " open --follow " + sessionId + " --term " + root.terminalCmd]);
   }
 
   function resumeSession(sessionId, cwd) {
     if (!sessionId)
       return;
-    var dir = cwd && cwd !== "" ? cwd : "~";
-    Quickshell.execDetached(["sh", "-c", root.terminalCmd + " -e sh -c " + _q("cd " + dir + " && claude --resume " + sessionId)]);
+    var extra = cwd && cwd !== "" ? " --cwd " + _q(cwd) : "";
+    Quickshell.execDetached(["sh", "-c", root.binPath + " open --resume " + sessionId + extra + " --term " + root.terminalCmd]);
   }
 
   // Anything the agent already finished can be reopened; a live one cannot.

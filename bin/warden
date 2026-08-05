@@ -237,6 +237,12 @@ def cmd_triage(cfg: dict, rule: str, subject: str, body: str) -> int:
          f"--unit=warden-session-{fp}", "--slice=background.slice",
          "--property=OOMScoreAdjust=700", "--property=MemoryMax=3G",
          "--property=CPUWeight=20", "--property=Nice=10",
+         # Hard ceiling on the whole cgroup. The Python-side timeout on
+         # subprocess.run is not sufficient on its own: a session was found
+         # alive and silent 13 HOURS after a 900s timeout should have ended it,
+         # still holding 223MB. systemd killing the unit does not depend on
+         # this process being healthy enough to do the killing.
+         f"--property=RuntimeMaxSec={int(cfg.get('session_timeout_sec', 900)) + 120}",
          os.path.realpath(__file__), "fix", inc_id],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return 0

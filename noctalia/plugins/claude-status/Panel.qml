@@ -307,7 +307,90 @@ Item {
       }
     }
 
-    // ── 3. recent runs ───────────────────────────────────────────────────────
+    // ── 3. sessions you can reopen ───────────────────────────────────────────
+    // Background agents are rare by design, so a panel that can only act on a
+    // live one gives you nothing to click most of the time. Every session here
+    // reopens with `claude --resume` in the directory it ran in.
+    NText {
+      text: "SESSIONS · click ▶ to open in a terminal"
+      pointSize: Style.fontSizeXS
+      font.weight: Style.fontWeightSemiBold
+      color: root.cMuted
+    }
+
+    NBox {
+      Layout.fillWidth: true
+      forceOpaque: true
+      implicitHeight: sessCol.implicitHeight + Style.marginM * 2
+
+      ColumnLayout {
+        id: sessCol
+        anchors.fill: parent
+        anchors.margins: Style.marginM
+        spacing: Style.marginXS
+
+        NText {
+          Layout.fillWidth: true
+          visible: svc && svc.sessions.length === 0
+          text: "No sessions on disk."
+          pointSize: Style.fontSizeXS
+          color: root.cMuted
+        }
+
+        Repeater {
+          model: svc ? svc.sessions.slice(0, 8) : []
+          delegate: RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.marginS
+
+            Rectangle {
+              Layout.alignment: Qt.AlignVCenter
+              implicitWidth: 8
+              implicitHeight: 8
+              radius: 4
+              color: modelData.live ? Color.mPrimary : root.cMuted
+            }
+            NText {
+              Layout.fillWidth: true
+              text: modelData.project || "?"
+              pointSize: Style.fontSizeS
+              color: modelData.exists ? Color.mOnSurface : root.cMuted
+              elide: Text.ElideMiddle
+            }
+            NText {
+              text: modelData.session_id ? modelData.session_id.substring(0, 8) : ""
+              pointSize: Style.fontSizeXS
+              color: root.cMuted
+              font.family: "monospace"
+            }
+            NText {
+              text: svc ? svc.fmtAgo(modelData.age_sec) : ""
+              pointSize: Style.fontSizeXS
+              color: root.cMuted
+              Layout.preferredWidth: 44
+              horizontalAlignment: Text.AlignRight
+            }
+            // A live session must not be resumed — that would put a second
+            // writer on its transcript — so it offers follow instead.
+            NIconButton {
+              icon: modelData.live ? "eye" : "player-play"
+              baseSize: Style.baseWidgetSize * 0.55
+              tooltipText: modelData.live ? "Follow this live session" : ("Resume in " + (modelData.cwd || "~"))
+              onClicked: {
+                if (!svc)
+                  return;
+                if (modelData.live)
+                  svc.followAgent(modelData.session_id);
+                else
+                  svc.resumeSession(modelData.session_id, modelData.cwd);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ── 4. recent runs ───────────────────────────────────────────────────────
     NText {
       text: "RECENT RUNS"
       pointSize: Style.fontSizeXS
@@ -400,7 +483,7 @@ Item {
       }
     }
 
-    // ── 4. jobs ──────────────────────────────────────────────────────────────
+    // ── 5. jobs ──────────────────────────────────────────────────────────────
     NText {
       text: "CLAUDE JOBS · do not start agents"
       pointSize: Style.fontSizeXS

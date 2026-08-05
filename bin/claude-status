@@ -7,6 +7,9 @@
 #   claude-status --push     ship a snapshot to the dashboard aggregator
 #   claude-status --follow <session-id>
 #                            tail a running agent's transcript, rendered readable
+#   claude-status open --follow <id>        open that follow in a terminal window
+#   claude-status open --resume <id> [--cwd DIR]
+#                            reopen a finished session interactively
 #
 # Scope is deliberate. An interactive session in a terminal or an editor is
 # something you are already looking at; it is counted and otherwise left alone.
@@ -24,6 +27,7 @@
 
 import json
 import os
+import re
 import pwd
 import shutil
 import socket
@@ -328,6 +332,100 @@ def osd_jobs() -> list[dict]:
     return jobs_
 
 
+
+# ── recent sessions (any kind, running or finished) ──────────────────────────
+def slug_to_path(slug: str) -> str:
+    """Reverse a project slug back to a real directory.
+
+    The slug replaces every character that is not a letter or digit with "-",
+    so it is lossy in two ways at once: a project whose name contains a dash
+    (ernährungs-app) looks like nested directories, and so does one containing
+    a non-ASCII letter (the "ä" is flattened too). String substitution cannot
+    recover either. Match against what is actually on disk instead: at each
+    level, re-flatten the real directory names the same way and take the
+    longest run of slug segments that a real entry accounts for."""
+    parts = slug.lstrip("-").split("-")
+    path, i = "/", 0
+    while i < len(parts):
+        try:
+            entries = [e for e in os.listdir(path)
+                       if os.path.isdir(os.path.join(path, e))]
+        except OSError:
+            entries = []
+        matched = False
+        for take in range(len(parts) - i, 0, -1):
+            want = "-".join(parts[i:i + take])
+            for e in entries:
+                if re.sub(r"[^A-Za-z0-9]", "-", e) == want:
+                    path, i, matched = os.path.join(path, e), i + take, True
+                    break
+            if matched:
+                break
+        if not matched:                 # project since deleted or renamed
+            path, i = os.path.join(path, parts[i]), i + 1
+    return path
+
+
+def recent_sessions(limit: int = 10, live_ids: set | None = None) -> list[dict]:
+    """The newest transcripts across every project.
+
+    Background agents are rare by design — most of the time nothing is running,
+    and a panel that can only act on a live agent gives you nothing to click.
+    Every one of these can be reopened with `claude --resume`, which is what
+    "open a past session" means."""
+    live_ids = live_ids or set()
+    out = []
+    if not PROJECTS.is_dir():
+        return out
+    for d in PROJECTS.iterdir():
+        if not d.is_dir():
+            continue
+        cwd = slug_to_path(d.name)
+        project = os.path.basename(cwd) or d.name
+        for f in d.glob("*.jsonl"):
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            out.append({
+                "session_id": f.stem,
+                "project": project,
+                "cwd": cwd,
+                "exists": os.path.isdir(cwd),
+                "mtime": st.st_mtime,
+                "age_sec": round(time.time() - st.st_mtime, 1),
+                "size_kb": round(st.st_size / 1024, 1),
+                "live": f.stem in live_ids,
+            })
+    out.sort(key=lambda r: -r["mtime"])
+    return out[:limit]
+
+
+def backfill_reports() -> int:
+    """Older warden reports stored the raw event stream instead of the parsed
+    result, so their session id is present in the text but not as a field. Pull
+    it out once so those runs become resumable too."""
+    d = WARDEN_STATE / "reports"
+    if not d.is_dir():
+        return 0
+    n = 0
+    for f in sorted(d.glob("*.json")):
+        try:
+            r = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if r.get("session_id"):
+            continue
+        m = re.search(r'"session_id"\s*:\s*"([0-9a-f-]{36})"', r.get("transcript") or "")
+        if not m:
+            continue
+        r["session_id"] = m.group(1)
+        r.setdefault("cwd", (r.get("incident") or {}).get("cwd") or "")
+        f.write_text(json.dumps(r, indent=2) + "\n")
+        n += 1
+    return n
+
+
 # ── triggers: what can START a background agent ──────────────────────────────
 # Only one thing on this machine actually launches an agent — journal-notify
 # hands an incident to warden, which runs `claude -p`. It is listed explicitly
@@ -455,9 +553,11 @@ def snapshot() -> dict:
     if w.get("incidents_open"):
         alerts.append(f"{w['incidents_open']} incident(s) with no agent run")
 
+    live_ids = {a.get("session_id") for a in agents_running if a.get("session_id")}
     return {
         "ts": time.time(),
         "host": socket.gethostname(),
+        "sessions": recent_sessions(10, live_ids),
         "user": pwd.getpwuid(UID).pw_name,
         "agents": {"running": agents_running, "recent": w["recent"]},
         "triggers": trg,
@@ -636,12 +736,106 @@ def follow(session_id: str) -> int:
     return 0
 
 
+# ── opening a session in a terminal ──────────────────────────────────────────
+# Terminals disagree about how to be handed a command, and getting it wrong
+# fails silently — the window flashes and closes with nothing to read. kitty in
+# particular has NO -e flag (its form is `kitty [options] program args...`);
+# passing the xterm-style -e is the single most likely reason a launcher button
+# appears to do nothing. Keeping this in the CLI rather than in QML means it can
+# be run and fixed from a shell instead of guessed at through the bar.
+#
+# `sh -lc` so a login shell supplies PATH; --hold / the read fallback so a
+# failure stays on screen instead of vanishing.
+TERMINALS = [
+    ("kitty", lambda c: ["kitty", "--hold", "sh", "-lc", c]),
+    ("ghostty", lambda c: ["ghostty", "-e", "sh", "-lc", c]),
+    ("foot", lambda c: ["foot", "sh", "-lc", c]),
+    ("wezterm", lambda c: ["wezterm", "start", "--", "sh", "-lc", c]),
+    ("alacritty", lambda c: ["alacritty", "-e", "sh", "-lc", c]),
+    ("gnome-terminal", lambda c: ["gnome-terminal", "--", "sh", "-lc", c]),
+    ("konsole", lambda c: ["konsole", "-e", "sh", "-lc", c]),
+    ("xterm", lambda c: ["xterm", "-e", "sh", "-lc", c]),
+]
+
+
+# Claude Code marks its own environment, and a session started inside one
+# inherits those markers — which makes the new session believe it is a CHILD and
+# silently turns transcript saving off ("inherited CLAUDE_CODE_CHILD_SESSION
+# marker"). A session you opened to read is worthless if it is not being
+# recorded, so the launcher hands the terminal a clean environment. This matters
+# whenever `claude-status open` is run from a terminal that is itself inside a
+# Claude session; from the bar the variables are absent anyway.
+CLAUDE_ENV_MARKERS = (
+    "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH", "CLAUDE_PID", "CLAUDE_EFFORT",
+)
+
+
+def clean_env() -> dict:
+    env = dict(os.environ)
+    for k in CLAUDE_ENV_MARKERS:
+        env.pop(k, None)
+    return env
+
+
+def spawn_terminal(inner: str, prefer: str = "") -> int:
+    """Open `inner` in a terminal window, detached from this process."""
+    hold = inner + "; rc=$?; [ $rc -ne 0 ] && { echo; echo \"exited $rc\"; }; " \
+                   "read -n1 -r -p 'press a key to close' _ 2>/dev/null || sleep 5"
+    order = TERMINALS
+    if prefer:
+        order = ([t for t in TERMINALS if t[0] == prefer]
+                 + [t for t in TERMINALS if t[0] != prefer])
+    for name, build in order:
+        if not shutil.which(name):
+            continue
+        argv = build(hold if name != "kitty" else inner)   # kitty --hold covers it
+        try:
+            subprocess.Popen(argv, start_new_session=True, env=clean_env(),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return 0
+        except OSError:
+            continue
+    sys.stderr.write("claude-status: no usable terminal found\n")
+    return 1
+
+
+def cmd_open(args: list) -> int:
+    def opt(name, default=""):
+        return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else default
+
+    prefer = opt("--term")
+    self_path = os.path.realpath(__file__)
+
+    if "--follow" in args:
+        sid = opt("--follow")
+        if not sid:
+            sys.stderr.write("claude-status: open --follow needs a session id\n")
+            return 2
+        return spawn_terminal(f"{self_path} --follow {sid}", prefer)
+
+    if "--resume" in args:
+        sid = opt("--resume")
+        if not sid:
+            sys.stderr.write("claude-status: open --resume needs a session id\n")
+            return 2
+        cwd = opt("--cwd") or str(HOME)
+        claude = shutil.which("claude") or str(HOME / ".local/bin/claude")
+        return spawn_terminal(f"cd {cwd!r} && exec {claude!r} --resume {sid}", prefer)
+
+    sys.stderr.write("claude-status: open needs --follow <id> or --resume <id>\n")
+    return 2
+
+
 def main() -> int:
     args = sys.argv[1:]
     if "-h" in args or "--help" in args:
         print(Path(__file__).read_text().split("\n\n")[0]
               .replace("#!/usr/bin/env python3\n", ""))
         return 0
+    if args and args[0] == "open":
+        return cmd_open(args[1:])
     if "--follow" in args:
         i = args.index("--follow")
         if i + 1 >= len(args):
