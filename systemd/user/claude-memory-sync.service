@@ -1,0 +1,8 @@
+[Unit]
+Description=Mirror Claude Code memory to the dashboard server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/claude-memory-sync
