@@ -154,6 +154,16 @@ def notify(cfg: dict, title: str, body: str = "", urgency: str = "normal") -> No
     """watcher only ever notifies about ITSELF — a session's verdict, or a reason
     it declined to run one. Notifying about the incident is journal-notify's
     job and duplicating it is what this rework exists to stop."""
+    # Recorded before it is shown: the dashboard mirrors this feed, and a
+    # headless machine has no notification daemon to show it on at all.
+    try:
+        log = Path(os.path.expanduser("~/.local/state/claude-status/notifications.jsonl"))
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a") as f:
+            f.write(json.dumps({"app": "watcher", "summary": title, "body": body,
+                                "urgency": urgency, "ts": time.time()}) + "\n")
+    except OSError:
+        pass
     if not shutil.which("notify-send"):
         return
     try:
@@ -443,7 +453,14 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
 
 
 # ── hook ─────────────────────────────────────────────────────────────────────
-JOURNAL_NOTIFY = Path(os.path.expanduser("~/.config/hypr/scripts/journal-notify.sh"))
+# The notifier sits with the desktop config on the laptop and in ~/.local/bin on
+# a headless machine, so look in both rather than assuming the desktop layout.
+JOURNAL_NOTIFY_CANDIDATES = [
+    Path(os.path.expanduser("~/.config/hypr/scripts/journal-notify.sh")),
+    Path(os.path.expanduser("~/.local/bin/journal-notify.sh")),
+]
+JOURNAL_NOTIFY = next((p for p in JOURNAL_NOTIFY_CANDIDATES if p.exists()),
+                     JOURNAL_NOTIFY_CANDIDATES[0])
 
 
 def hook_wired() -> bool:

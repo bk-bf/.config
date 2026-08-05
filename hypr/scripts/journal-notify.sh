@@ -124,7 +124,20 @@ burst_ok() {
 
 # Per-(rule,subject) cooldown with escalating backoff + coalescing.
 # Prints " (+N more)" suffix on a fire that had suppressed repeats. Returns 0 to notify.
-should_notify() {
+should_# Append one toast to the feed claude-status mirrors to the dashboard.
+NOTIFY_LOG="${HOME}/.local/state/claude-status/notifications.jsonl"
+notify_log() {
+  mkdir -p "$(dirname "$NOTIFY_LOG")" 2>/dev/null || return 0
+  python3 - "$@" <<'PY' >> "$NOTIFY_LOG" 2>/dev/null || true
+import json, sys, time, os
+rule, summary, subject, body, urgency = (sys.argv[1:6] + [""] * 5)[:5]
+print(json.dumps({"app": "system", "rule": rule, "summary": summary,
+                  "body": (subject + " " + body).strip()[:300],
+                  "urgency": urgency, "ts": time.time()}))
+PY
+}
+
+notify() {
   local key="$1" base="$2" now last count strikes f eff
   now=$(date +%s); f="$STATE_DIR/$(sanitize "$key")"
   last=0; count=0; strikes=0
@@ -157,7 +170,11 @@ notify() {
   local title="${RULE_TITLE[$rule]:-$rule}"
   suffix=$(should_notify "$rule/$subject" "$cooldown") || return 0
   [[ $urgency != critical ]] && ! burst_ok && return 0
-  notify-send -a "system" -u "$urgency" \
+  # Log first, toast second. A headless machine has no notification daemon at
+  # all, and the dashboard mirrors this log — so the record must not depend on
+  # there being a screen to show it on.
+  notify_log "$rule" "${title}${suffix}" "${subject}" "$body" "$urgency"
+  command -v notify-send >/dev/null 2>&1 && notify-send -a "system" -u "$urgency" \
     "${title}${suffix}" "${subject}"$'\n'"${body:0:180}"
   triage "$rule" "$subject" "$body"
 }

@@ -8,6 +8,7 @@
 #   claude-status --follow <session-id>
 #                            tail a running agent's transcript, rendered readable
 #   claude-status open --follow <id>        open that follow in a terminal window
+#   claude-status onboard <ssh-host>   install on another machine
 #   claude-status rm --session <id> | --run <id> | --job <unit>
 #   claude-status open --resume <id> [--cwd DIR]
 #                            reopen a finished session interactively
@@ -26,6 +27,7 @@
 # One source of truth on purpose: the noctalia plugin and the dashboard tab both
 # read this rather than each re-deriving what counts.
 
+import html
 import json
 import os
 import re
@@ -219,7 +221,9 @@ def processes() -> list[dict]:
 # ── watcher ───────────────────────────────────────────────────────────────────
 def watcher_state() -> dict:
     out = {"hook_wired": False, "budget": None, "recent": [], "incidents_open": 0}
-    jn = HOME / ".config/hypr/scripts/journal-notify.sh"
+    jn = next((c for c in (HOME / ".config/hypr/scripts/journal-notify.sh",
+                           HOME / ".local/bin/journal-notify.sh") if c.exists()),
+              HOME / ".config/hypr/scripts/journal-notify.sh")
     try:
         t = jn.read_text(errors="ignore")
         out["hook_wired"] = 'triage "$rule"' in t and "WATCHER" in t
@@ -365,6 +369,66 @@ def slug_to_path(slug: str) -> str:
         if not matched:                 # project since deleted or renamed
             path, i = os.path.join(path, parts[i]), i + 1
     return path
+
+
+# ── notifications ────────────────────────────────────────────────────────────
+NOCTALIA_HISTORY = Path(os.path.expanduser("~/.cache/noctalia/notifications.json"))
+NOTIFY_APPS = ("system", "watcher", "warden", "osd")
+
+
+def recent_notifications(limit: int = 12) -> list[dict]:
+    """The toasts this machine actually raised, so the dashboard can show the
+    same thing you saw on screen — and so a headless machine, which has no
+    desktop to toast at, still has somewhere to report.
+
+    Read from noctalia's own history rather than kept separately: what is
+    mirrored is then by definition what was shown."""
+    out = []
+    # The written feed first — it is the only source on a headless host, and on
+    # the laptop it carries the same events with the rule attached.
+    feed = Path(os.path.expanduser("~/.local/state/claude-status/notifications.jsonl"))
+    try:
+        for line in feed.read_text(errors="replace").splitlines()[-200:]:
+            try:
+                n = json.loads(line)
+            except ValueError:
+                continue
+            out.append({"app": n.get("app", ""), "summary": n.get("summary", ""),
+                        "body": n.get("body", ""), "ts": n.get("ts", 0),
+                        "age_sec": round(time.time() - (n.get("ts") or 0), 1),
+                        "urgency": n.get("urgency", "")})
+    except OSError:
+        pass
+    try:
+        ns = json.loads(NOCTALIA_HISTORY.read_text()).get("notifications", [])
+    except (OSError, ValueError):
+        ns = []
+    for n in ns:
+        app = (n.get("appName") or "").lower()
+        if app not in NOTIFY_APPS:
+            continue
+        ts = n.get("timestamp", 0) or 0
+        ts = ts / 1000 if ts > 1e12 else ts
+        out.append({
+            "app": n.get("appName") or "",
+            "summary": html.unescape((n.get("summary") or "").strip()),
+            "body": html.unescape((n.get("body") or "").strip())[:300],
+            "ts": ts,
+            "age_sec": round(time.time() - ts, 1) if ts else None,
+            "urgency": n.get("urgency", ""),
+        })
+    # The laptop records each toast twice — once when written to the feed, once
+    # by noctalia when it was shown. Same event, so collapse on summary + time.
+    out.sort(key=lambda n: -(n["ts"] or 0))
+    deduped, seen = [], []
+    for n in out:
+        key = n["summary"].strip().lower()
+        if any(k == key and abs(t - (n["ts"] or 0)) < 10 for k, t in seen):
+            continue
+        seen.append((key, n["ts"] or 0))
+        deduped.append(n)
+    return deduped[:limit]
+
 
 
 # ── herdr ────────────────────────────────────────────────────────────────────
@@ -611,8 +675,14 @@ def jobs() -> list[dict]:
         p = unit_state(unit)
         load = p.get("LoadState", "not-found")
         if load == "not-found":
-            out.append({"name": label, "unit": unit, "what": what,
-                        "ok": False, "state": "not installed", "detail": ""})
+            # Only the trigger chain is required everywhere. The rest is
+            # per-machine housekeeping, and listing a laptop-only job as
+            # "missing" on a server is noise, not a finding.
+            if unit == "journal-notify.service":
+                out.append({"name": label, "unit": unit, "what": what, "ok": False,
+                            "state": "not installed", "detail": "",
+                            "problem": "Not installed on this machine, so nothing "
+                                       "here can start an agent.", "action": {}})
             continue
         # For a timer, health is two separate facts: is the timer itself armed,
         # and did its last run succeed. Reading ActiveState off the SERVICE is
@@ -673,6 +743,7 @@ def snapshot() -> dict:
         "ts": time.time(),
         "host": socket.gethostname(),
         "sessions": recent_sessions(10, live_ids),
+        "notifications": recent_notifications(),
         "user": pwd.getpwuid(UID).pw_name,
         "agents": {"running": agents_running, "recent": w["recent"]},
         "triggers": trg,
@@ -770,6 +841,17 @@ def push(snap: dict) -> int:
     host = "ubuntu@100.122.63.6"
     dest = f"Documents/Projects/dashboard/.cache_sources/claude-status-{snap['host']}.json"
     payload = json.dumps(snap)
+
+    # On the dashboard machine itself there is nothing to ssh to.
+    local_dir = HOME / "Documents/Projects/dashboard/.cache_sources"
+    if local_dir.is_dir():
+        f = local_dir / f"claude-status-{snap['host']}.json"
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(payload)
+        tmp.replace(f)
+        print(f"wrote {len(payload)} bytes -> {f}")
+        return 0
+
     p = subprocess.run(
         ["ssh", "-o", "ConnectTimeout=15", host,
          f"mkdir -p $(dirname {dest}) && cat > {dest}.tmp && mv {dest}.tmp {dest}"],
@@ -1039,12 +1121,85 @@ def cmd_rm(args: list) -> int:
     return 2
 
 
+# ── onboarding another machine ───────────────────────────────────────────────
+# A new device needs three things to appear on the dashboard: this script, a
+# timer that pushes its snapshot, and the ssh route to send it. Everything else
+# (which sessions exist, which units are its scripts, what agents ran) it works
+# out for itself, so onboarding is a copy and an enable rather than a per-host
+# configuration file.
+PUSH_UNIT = """[Unit]
+Description=push this machine's Claude activity snapshot to the dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/claude-status --push
+Slice=background.slice
+OOMScoreAdjust=700
+MemoryMax=256M
+CPUWeight=20
+Nice=15
+TimeoutStartSec=90
+SuccessExitStatus=0 1
+"""
+
+PUSH_TIMER = """[Unit]
+Description=periodic Claude activity push to the dashboard
+
+[Timer]
+OnStartupSec=45s
+OnUnitActiveSec=60s
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
+"""
+
+
+def cmd_onboard(args: list) -> int:
+    if not args:
+        sys.stderr.write("claude-status: onboard needs an ssh target "
+                         "(e.g. `claude-status onboard ubuntu`)\n")
+        return 2
+    target = args[0]
+    src = os.path.realpath(__file__)
+
+    print(f"→ copying claude-status to {target}")
+    rc = subprocess.call(["ssh", target, "mkdir -p ~/.local/bin ~/.config/systemd/user"])
+    if rc != 0:
+        sys.stderr.write(f"claude-status: cannot reach {target}\n")
+        return 1
+    if subprocess.call(["scp", "-q", src, f"{target}:.local/bin/claude-status"]) != 0:
+        return 1
+    subprocess.call(["ssh", target, "chmod +x ~/.local/bin/claude-status"])
+
+    print("→ installing the push timer")
+    for name, body in (("claude-status-push.service", PUSH_UNIT),
+                       ("claude-status-push.timer", PUSH_TIMER)):
+        subprocess.run(["ssh", target, f"cat > ~/.config/systemd/user/{name}"],
+                       input=body, text=True)
+    subprocess.call(["ssh", target,
+                     "systemctl --user daemon-reload && "
+                     "systemctl --user enable --now claude-status-push.timer"])
+
+    print("→ first push")
+    rc, out = run(["ssh", target, "~/.local/bin/claude-status --push"], timeout=120)
+    print("  " + (out.strip().splitlines() or ["(no output)"])[-1])
+
+    print("\nOnboarded. It appears on the dashboard within a minute.")
+    print(f"Check it with:  ssh {target} claude-status")
+    return 0 if rc == 0 else 1
+
+
 def main() -> int:
     args = sys.argv[1:]
     if "-h" in args or "--help" in args:
         print(Path(__file__).read_text().split("\n\n")[0]
               .replace("#!/usr/bin/env python3\n", ""))
         return 0
+    if args and args[0] == "onboard":
+        return cmd_onboard(args[1:])
     if args and args[0] == "rm":
         return cmd_rm(args[1:])
     if args and args[0] == "open":
