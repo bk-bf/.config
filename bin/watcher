@@ -295,14 +295,30 @@ def unit_context(unit: str) -> str:
     return "\n\n".join(parts)
 
 
-def snapper_snapshot(desc: str) -> str | None:
-    """Bracket the session so anything it does is revertible with `undo`."""
-    if not shutil.which("snapper"):
-        return None
-    rc, out = run(["snapper", "-c", "home", "create", "--print-number",
-                   "--description", desc, "--cleanup-algorithm", "number"], timeout=120)
-    num = out.strip().splitlines()[-1].strip() if rc == 0 and out.strip() else ""
-    return num if num.isdigit() else None
+def git_restore_point(cwd: str) -> dict:
+    """A restore point that costs nothing and touches nothing.
+
+    `git stash create` writes a commit object capturing the current working
+    tree WITHOUT modifying the tree or the stash list — so an agent about to
+    edit a repo can be given a point to come back to without disturbing
+    whatever was already in progress there. If the tree was clean, HEAD is
+    already that point.
+
+    This replaces the snapper bracket: snapshots only existed on the laptop,
+    and every project an agent touches is a git repo on both machines."""
+    rc, _ = run(["git", "-C", cwd, "rev-parse", "--git-dir"], timeout=15)
+    if rc != 0:
+        return {"repo": False}
+    _, head = run(["git", "-C", cwd, "rev-parse", "HEAD"], timeout=15)
+    _, porcelain = run(["git", "-C", cwd, "status", "--porcelain"], timeout=20)
+    dirty = bool(porcelain.strip())
+    stash = ""
+    if dirty:
+        rc2, out = run(["git", "-C", cwd, "stash", "create"], timeout=30)
+        if rc2 == 0:
+            stash = out.strip().splitlines()[-1].strip() if out.strip() else ""
+    return {"repo": True, "head": head.strip(), "dirty_before": dirty,
+            "stash": stash, "cwd": cwd}
 
 
 def is_restartable(unit: str) -> bool:
@@ -420,7 +436,7 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
 
     extra = [str(a) for a in cfg.get("session_args", [])]
     may_change = bool(extra)   # an unelevated session cannot edit anything anyway
-    pre = snapper_snapshot(f"watcher pre {inc_id} ({inc['subject']})") if may_change else None
+    pre = git_restore_point(cwd) if may_change else None
     prompt = build_prompt(inc, unit_context(inc.get("unit", "")), may_change)
     started = time.time()
     try:
@@ -433,7 +449,7 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
         raw = p.stdout
     except subprocess.TimeoutExpired:
         raw, p = "", None
-    post = snapper_snapshot(f"watcher post {inc_id}") if may_change else None
+
 
     text, cost, session_id = parse_session_output(raw)
     if not text:
@@ -461,7 +477,7 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
         "changed": changed_files(cwd),
         "verified": verified, "cost_usd": cost, "read_only": not may_change,
         "session_id": session_id, "cwd": cwd,
-        "snapshot_pre": pre, "snapshot_post": post,
+        "restore": pre,
         "duration_sec": round(time.time() - started, 1),
         "transcript": text,
     }
@@ -471,7 +487,7 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
     icon = {"fixed": "✓", "no-change": "·", "needs-human": "✋"}.get(verdict, "?")
     if verified is False:
         icon, verdict = "✗", "still failing"
-    tail = f"\nrevert: undo <path> {pre}" if pre else ""
+    tail = f"\nundo: watcher undo {inc_id}" if (pre or {}).get("repo") else ""
     notify(cfg, f"{icon} watcher · {inc['subject']}",
            f"{summary}{tail}\nwatcher report {inc_id}",
            urgency="critical" if verdict in ("needs-human", "still failing") else "normal")
@@ -543,9 +559,11 @@ def cmd_report(inc_id: str) -> int:
     print(f"{inc['subject']}  —  {inc['message']}\n")
     print(f"verdict   {r['verdict']}  ({r['summary']})")
     print(f"verified  {r['verified']}   read-only: {r.get('read_only')}")
-    if r.get("snapshot_pre"):
-        print(f"snapshot  {r['snapshot_pre']} → {r['snapshot_post']}"
-              f"   revert with: undo <path> {r['snapshot_pre']}")
+    ch = r.get("changed") or {}
+    if ch.get("files"):
+        print("changed   " + ", ".join(ch["files"][:8]))
+    if (r.get("restore") or {}).get("repo"):
+        print(f"undo      watcher undo {inc.get('id', '')}")
     print(f"cost      ${r['cost_usd']}   {r['duration_sec']}s\n")
     print(r["transcript"])
     return 0

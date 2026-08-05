@@ -13,11 +13,18 @@
 #   claude-status open --resume <id> [--cwd DIR]
 #                            reopen a finished session interactively
 #
-# Scope is deliberate. An interactive session in a terminal or an editor is
-# something you are already looking at; it is counted and otherwise left alone.
-# What has no surface at all is the unattended work — an agent watcher started
-# because a unit failed while you were asleep — and the triggers that can start
-# one. Those are the two things this reports.
+# Scope is deliberate: report what has no surface of its own. An interactive
+# session in a terminal is something you are already looking at, so it is counted
+# and left alone. What nobody is watching is the unattended stuff — an agent
+# watcher started because a unit failed overnight, the triggers that can start
+# one, a docker container quietly crash-looping, a failed unit.
+#
+# Failed units are collected wholesale rather than from WATCHED_UNITS, and
+# containers are read from docker directly, because the failure that costs you a
+# day is always the one nobody thought to add to a list. Containers only alert
+# when they are meant to be up (restart policy always/unless-stopped) — half a
+# media box is deliberately stopped, and alerting on those teaches you to ignore
+# the list, which is how the real one gets missed.
 #
 # "Running" is not the useful signal for an agent: a wedged headless run has the
 # same process, RSS and uptime as a working one. Claude Code appends to
@@ -717,6 +724,77 @@ def jobs() -> list[dict]:
 
 
 # ── assembly ─────────────────────────────────────────────────────────────────
+def containers() -> list[dict]:
+    """Docker containers on this machine, with the two failure modes that hide.
+
+    A crash-looping container is the nastiest kind of down: `docker compose up`
+    reports success, the container object exists, and something may even answer
+    on the port — the old process that never released it. Restart count and the
+    `restarting` state are what actually distinguish it from healthy.
+    """
+    fmt = ("{{.Name}}\t{{.State.Status}}\t{{.RestartCount}}"
+           "\t{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}"
+           "\t{{.State.ExitCode}}\t{{.HostConfig.RestartPolicy.Name}}")
+    rc, out = run(["docker", "ps", "-a", "--format", "{{.Names}}"], timeout=10)
+    if rc != 0:
+        return []                                  # no docker here — not a fault
+    names = [n for n in out.split() if n]
+    if not names:
+        return []
+    rc, out = run(["docker", "inspect", "-f", fmt, *names], timeout=20)
+    if rc != 0:
+        return []
+    rows = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 6:
+            continue
+        name, status, restarts, health, code, policy = parts[:6]
+        name = name.lstrip("/")
+        restarts = int(restarts) if restarts.isdigit() else 0
+        # Only complain about containers that are *supposed* to be up. Half this
+        # box's containers are deliberately stopped; alerting on those trains you
+        # to ignore the list, which is how the real one gets missed.
+        wanted_up = policy in ("always", "unless-stopped")
+        problem = ""
+        if status == "restarting":
+            problem = f"crash-looping ({restarts} restarts)"
+        elif status == "running" and health == "unhealthy":
+            problem = "unhealthy"          # a stopped container keeps its last
+                                           # health value; only live ones mean it
+        elif status == "exited" and wanted_up and code not in ("0", ""):
+            problem = f"exited {code} but restart={policy}"
+        rows.append({"name": name, "status": status, "restarts": restarts,
+                     "health": health, "exit_code": code, "policy": policy,
+                     "ok": not problem, "problem": problem,
+                     # flapping history worth seeing without being an alert
+                     "flapped": status == "running" and restarts > 3})
+    rows.sort(key=lambda c: (c["ok"], c["name"]))
+    return rows
+
+
+def failed_units() -> list[dict]:
+    """Every failed unit, user and system — not a hand-picked list.
+
+    WATCHED_UNITS names the ones whose health means something for agent work, but
+    a monitor that only looks where it was told to look misses exactly the thing
+    nobody predicted. This is the catch-all.
+    """
+    out_rows = []
+    for scope in ("--user", "--system"):
+        rc, out = run(["systemctl", scope, "list-units", "--failed",
+                       "--no-legend", "--no-pager", "--plain"], timeout=15)
+        if rc != 0:
+            continue
+        for line in out.splitlines():
+            parts = line.split()
+            if not parts or not parts[0].endswith((".service", ".timer", ".mount", ".socket")):
+                continue
+            out_rows.append({"unit": parts[0], "scope": scope.lstrip("-"),
+                             "state": " ".join(parts[1:4])})
+    return out_rows
+
+
 def snapshot() -> dict:
     procs = processes()
     agents_running = [p for p in procs if p.get("kind") == "headless"]
@@ -737,6 +815,13 @@ def snapshot() -> dict:
         idle = (a.get("transcript") or {}).get("idle_sec")
         if idle is not None and idle > 300:
             alerts.append(f"agent pid {a['pid']} silent for {int(idle // 60)}min")
+    ctr = containers()
+    for c in ctr:
+        if not c["ok"]:
+            alerts.append(f"container {c['name']}: {c['problem']}")
+    fu = failed_units()
+    for u in fu:
+        alerts.append(f"unit {u['unit']} failed ({u['scope']})")
 
     live_ids = {a.get("session_id") for a in agents_running if a.get("session_id")}
     return {
@@ -748,6 +833,8 @@ def snapshot() -> dict:
         "agents": {"running": agents_running, "recent": w["recent"]},
         "triggers": trg,
         "jobs": jb,
+        "containers": ctr,
+        "failed_units": fu,
         "interactive": {"count": len(interactive), "procs": interactive,
                         "desktop": desktop},
         "alerts": alerts,
