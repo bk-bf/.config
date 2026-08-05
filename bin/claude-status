@@ -569,6 +569,34 @@ JOB_UNITS = [
 ]
 
 
+
+# ── turning a failure into a sentence and an action ──────────────────────────
+# Raw journal text is not a user interface. "claude-sessions-laptop: 73
+# deletions exceed the guard of 25 — sync skipped. Raise delete_guard or sync
+# manually to override." tells you the mechanism and leaves you to work out both
+# what it means and what to do. Say what happened in one sentence, and offer the
+# button that fixes it.
+def explain(job_name: str, detail: str) -> dict:
+    if not detail:
+        return {}
+    m = re.search(r"(\S+): (\d+) deletions exceed the guard of (\d+)", detail)
+    if m:
+        conn, dels, guard = m.group(1), m.group(2), m.group(3)
+        return {
+            "problem": f"{dels} files would be deleted on the server — over the "
+                       f"safety limit of {guard}, so the whole sync is paused.",
+            "action": {"label": "Sync now",
+                       "cmd": f"osd -c {conn} --sync",
+                       "cwd": str(HOME / "Documents/local/Projects/osd")},
+        }
+    if "osync exited with code" in detail:
+        return {"problem": "The sync tool exited with an error.", "action": {}}
+    # Unknown failure: still strip the duplicated unit prefix so the sentence
+    # does not say the same name twice.
+    txt = detail.split(": ", 1)[-1] if detail.startswith(job_name.split(" · ")[-1]) else detail
+    return {"problem": txt[:160], "action": {}}
+
+
 def unit_script(unit: str) -> str:
     """The file a unit actually runs, so a card can open it in an editor."""
     rc, out = run(["systemctl", "--user", "show", unit, "-p", "ExecStart", "--value"])
@@ -603,7 +631,8 @@ def jobs() -> list[dict]:
         else:
             state = "waiting" if is_timer else active
         out.append({"name": label, "unit": unit, "what": what, "ok": bool(ok),
-                    "state": state, "detail": reason, "script": unit_script(svc)})
+                    "state": state, "detail": reason, "script": unit_script(svc),
+                    **explain(label, "" if ok else reason)})
 
     for j in osd_jobs():
         out.append({"name": f"sync · {j['name']}", "unit": j["unit"],
@@ -611,7 +640,8 @@ def jobs() -> list[dict]:
                     "what": "osync replica", "ok": j["ok"],
                     "state": ("running" if j.get("running")
                               else ("last run failed" if not j["ok"] else "in sync")),
-                    "detail": j["detail"]})
+                    "detail": j["detail"],
+                    **explain(j["name"], "" if j["ok"] else j["detail"])})
     return out
 
 
@@ -631,13 +661,11 @@ def snapshot() -> dict:
             alerts.append(f"trigger '{t['name']}' is NOT armed — {t['why']}")
     for j in jb:
         if not j["ok"]:
-            alerts.append(f"{j['name']}: {j['detail'] or j['state']}")
+            alerts.append(f"{j['name']}: {j.get('problem') or j['state']}")
     for a in agents_running:
         idle = (a.get("transcript") or {}).get("idle_sec")
         if idle is not None and idle > 300:
             alerts.append(f"agent pid {a['pid']} silent for {int(idle // 60)}min")
-    if w.get("incidents_open"):
-        alerts.append(f"{w['incidents_open']} incident(s) with no agent run")
 
     live_ids = {a.get("session_id") for a in agents_running if a.get("session_id")}
     return {
@@ -927,6 +955,13 @@ def cmd_open(args: list) -> int:
         name = opt("--herdr") or os.path.basename(cwd.rstrip("/")) or "claude"
         herdr = shutil.which("herdr") or str(HOME / ".local/bin/herdr")
         return spawn_terminal(f"cd {cwd!r} && exec {herdr!r} --session {name}", prefer)
+
+    if "--run" in args:
+        cmd = opt("--run")
+        if not cmd:
+            return 2
+        cwd = opt("--cwd") or str(HOME)
+        return spawn_terminal(f"cd {cwd!r} && {cmd}", prefer)
 
     if "--edit" in args:
         path = opt("--edit")

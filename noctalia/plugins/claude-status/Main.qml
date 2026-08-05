@@ -169,6 +169,14 @@ Item {
     Quickshell.execDetached(["sh", "-c", root.binPath + " open --herdr " + _q(name || "claude") + " --cwd " + _q(cwd || "~") + " --term " + root.terminalCmd]);
   }
 
+  // Runs the suggested fix in a terminal rather than silently: the command is
+  // visible, its output is visible, and the click is the authorisation.
+  function runAction(cmd, cwd) {
+    if (!cmd)
+      return;
+    Quickshell.execDetached(["sh", "-c", root.binPath + " open --run " + _q(cmd) + " --cwd " + _q(cwd || "~") + " --term " + root.terminalCmd]);
+  }
+
   function openScript(path) {
     if (!path)
       return;

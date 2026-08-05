@@ -194,42 +194,6 @@ Item {
       }
     }
 
-    // ── alerts ───────────────────────────────────────────────────────────────
-    NBox {
-      Layout.fillWidth: true
-      visible: svc && svc.alerts.length > 0
-      forceOpaque: true
-      implicitHeight: alertCol.implicitHeight + Style.marginM * 2
-
-      ColumnLayout {
-        id: alertCol
-        anchors.fill: parent
-        anchors.margins: Style.marginM
-        spacing: Style.marginXS
-
-        Repeater {
-          model: svc ? svc.alerts : []
-          delegate: RowLayout {
-            Layout.fillWidth: true
-            spacing: Style.marginS
-            NText {
-              text: "!"
-              color: Color.mError
-              font.weight: Style.fontWeightBold
-              pointSize: Style.fontSizeS
-            }
-            NText {
-              Layout.fillWidth: true
-              text: modelData
-              pointSize: Style.fontSizeXS
-              color: Color.mOnSurface
-              wrapMode: Text.WordWrap
-            }
-          }
-        }
-      }
-    }
-
     // ── sessions ─────────────────────────────────────────────────────────────
     RowLayout {
       Layout.fillWidth: true
@@ -530,15 +494,27 @@ Item {
               pointSize: Style.fontSizeXS
               color: modelData.ok ? Color.mPrimary : Color.mError
             }
+            // The plain sentence, not the journal line. Raw log text tells you
+            // the mechanism and leaves you to work out both what it means and
+            // what to do about it.
             NText {
               Layout.fillWidth: true
-              visible: !modelData.ok && modelData.detail
-              text: modelData.detail || ""
+              visible: !modelData.ok && modelData.problem
+              text: modelData.problem || ""
               pointSize: Style.fontSizeXS
               color: Color.mError
               wrapMode: Text.WordWrap
               maximumLineCount: 3
               elide: Text.ElideRight
+            }
+            NButton {
+              Layout.fillWidth: true
+              visible: !modelData.ok && modelData.action && modelData.action.label
+              text: (modelData.action && modelData.action.label) || ""
+              onClicked: {
+                if (svc && modelData.action)
+                  svc.runAction(modelData.action.cmd, modelData.action.cwd);
+              }
             }
           }
         }
