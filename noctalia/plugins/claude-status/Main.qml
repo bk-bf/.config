@@ -125,10 +125,10 @@ Item {
     return "'" + String(s).replace(/'/g, "'\\''") + "'";
   }
 
-  // Open the full report for a triage run in a terminal. `warden report` prints
+  // Open the full report for a triage run in a terminal. `watcher report` prints
   // the whole transcript, which is far more than a panel should try to render.
   function openReport(id) {
-    Quickshell.execDetached(["sh", "-c", root.terminalCmd + " -e sh -c " + _q("warden report " + id + "; echo; read -n1 -p 'enter to close'")]);
+    Quickshell.execDetached(["sh", "-c", root.terminalCmd + " -e sh -c " + _q("watcher report " + id + "; echo; read -n1 -p 'enter to close'")]);
   }
   function openStatus() {
     Quickshell.execDetached(["sh", "-c", root.terminalCmd + " -e sh -c " + _q("watch -c -n5 " + root.binPath)]);
@@ -156,6 +156,13 @@ Item {
       return;
     var extra = cwd && cwd !== "" ? " --cwd " + _q(cwd) : "";
     Quickshell.execDetached(["sh", "-c", root.binPath + " open --resume " + sessionId + extra + " --term " + root.terminalCmd]);
+  }
+
+  // Focus an existing herdr pane. No terminal, no nesting — herdr raises it.
+  function focusPane(paneId) {
+    if (!paneId)
+      return;
+    Quickshell.execDetached(["sh", "-c", root.binPath + " open --focus " + _q(paneId)]);
   }
 
   function openHerdr(cwd, name) {

@@ -162,15 +162,15 @@ notify() {
   triage "$rule" "$subject" "$body"
 }
 
-# Hand anything that got past every filter above to warden, which decides
-# whether it is worth a headless Claude Code session (`warden doctor` shows
+# Hand anything that got past every filter above to watcher, which decides
+# whether it is worth a headless Claude Code session (`watcher doctor` shows
 # which rules it acts on — oom and pressure are deliberately not among them).
 # Detached and failure-tolerant on purpose: triage is a bonus on top of the
 # toast, and must never be able to delay or break the notification path.
-WARDEN=~/.local/bin/warden
+WATCHER=~/.local/bin/watcher
 triage() {
-  [[ -x $WARDEN ]] || return 0
-  setsid "$WARDEN" triage "$1" "$2" "$3" >/dev/null 2>&1 &
+  [[ -x $WATCHER ]] || return 0
+  setsid "$WATCHER" triage "$1" "$2" "$3" >/dev/null 2>&1 &
   disown 2>/dev/null || true
 }
 

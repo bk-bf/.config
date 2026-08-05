@@ -13,7 +13,7 @@
 #
 # Scope is deliberate. An interactive session in a terminal or an editor is
 # something you are already looking at; it is counted and otherwise left alone.
-# What has no surface at all is the unattended work — an agent warden started
+# What has no surface at all is the unattended work — an agent watcher started
 # because a unit failed while you were asleep — and the triggers that can start
 # one. Those are the two things this reports.
 #
@@ -38,7 +38,7 @@ from pathlib import Path
 
 HOME = Path.home()
 PROJECTS = HOME / ".claude" / "projects"
-WARDEN_STATE = HOME / ".local/state/warden"
+WATCHER_STATE = HOME / ".local/state/watcher"
 UID = os.getuid()
 
 # Units whose health means something for background Claude work. Anything that
@@ -75,7 +75,7 @@ def proc_cwd(pid: int) -> str:
 
 def proc_unit(pid: int) -> str:
     """Last path component of the cgroup — for a transient session that is
-    warden-session-<fp>.service, which ties the process back to its incident."""
+    watcher-session-<fp>.service, which ties the process back to its incident."""
     cg = proc_field(pid, "cgroup").strip()
     if not cg:
         return ""
@@ -107,7 +107,7 @@ def classify(args: str, comm: str, pid: int) -> str | None:
     toks = args.split()
     if "-p" in toks or "--print" in toks:
         return "headless"
-    if proc_unit(pid).startswith("warden-session-"):
+    if proc_unit(pid).startswith("watcher-session-"):
         return "headless"
     if "--resume" in toks or "-c" in toks or "--continue" in toks:
         return "interactive"
@@ -215,24 +215,24 @@ def processes() -> list[dict]:
     return found
 
 
-# ── warden ───────────────────────────────────────────────────────────────────
-def warden_state() -> dict:
+# ── watcher ───────────────────────────────────────────────────────────────────
+def watcher_state() -> dict:
     out = {"hook_wired": False, "budget": None, "recent": [], "incidents_open": 0}
     jn = HOME / ".config/hypr/scripts/journal-notify.sh"
     try:
         t = jn.read_text(errors="ignore")
-        out["hook_wired"] = 'triage "$rule"' in t and "WARDEN" in t
+        out["hook_wired"] = 'triage "$rule"' in t and "WATCHER" in t
     except OSError:
         pass
     try:
-        st = json.loads((WARDEN_STATE / "state.json").read_text())
+        st = json.loads((WATCHER_STATE / "state.json").read_text())
         today = time.strftime("%Y-%m-%d")
         out["budget"] = {"used": st.get("sessions", {}).get(today, 0), "cap": 6}
     except (OSError, json.JSONDecodeError):
         pass
 
-    reports = WARDEN_STATE / "reports"
-    incidents = WARDEN_STATE / "incidents"
+    reports = WATCHER_STATE / "reports"
+    incidents = WATCHER_STATE / "incidents"
     done = set()
     if reports.is_dir():
         for f in sorted(reports.glob("*.json"))[-8:]:
@@ -366,6 +366,41 @@ def slug_to_path(slug: str) -> str:
     return path
 
 
+# ── herdr ────────────────────────────────────────────────────────────────────
+def herdr_panes() -> dict:
+    """Claude sessions that live in a herdr pane, keyed by session id.
+
+    herdr knows things nothing else here does: the title Claude actually
+    generated for the session, whether the agent is idle or working, and the
+    pane it occupies. A pane id means a session can simply be FOCUSED rather
+    than reopened — and it avoids launching herdr inside herdr, which herdr
+    refuses ("nested herdr is disabled by default")."""
+    if not shutil.which("herdr"):
+        return {}
+    rc, out = run(["herdr", "pane", "list"], timeout=10)
+    if rc != 0:
+        return {}
+    try:
+        panes = json.loads(out)["result"]["panes"]
+    except (ValueError, KeyError, TypeError):
+        return {}
+    found = {}
+    for pane in panes:
+        sess = pane.get("agent_session") or {}
+        sid = sess.get("value")
+        if not sid:
+            continue
+        found[sid] = {
+            "pane_id": pane.get("pane_id"),
+            "tab_id": pane.get("tab_id"),
+            "title": pane.get("terminal_title_stripped") or "",
+            "status": pane.get("agent_status") or "",
+            "cwd": pane.get("cwd") or "",
+        }
+    return found
+
+
+
 def session_title(f: Path) -> str:
     """A human label for a session.
 
@@ -413,6 +448,7 @@ def recent_sessions(limit: int = 10, live_ids: set | None = None) -> list[dict]:
     Every one of these can be reopened with `claude --resume`, which is what
     "open a past session" means."""
     live_ids = live_ids or set()
+    panes = herdr_panes()
     out = []
     if not PROJECTS.is_dir():
         return out
@@ -435,17 +471,19 @@ def recent_sessions(limit: int = 10, live_ids: set | None = None) -> list[dict]:
                 "age_sec": round(time.time() - st.st_mtime, 1),
                 "size_kb": round(st.st_size / 1024, 1),
                 "live": f.stem in live_ids,
-                "title": session_title(f),
+                "title": (panes.get(f.stem, {}).get("title") or session_title(f)),
+                "pane_id": panes.get(f.stem, {}).get("pane_id", ""),
+                "agent_status": panes.get(f.stem, {}).get("status", ""),
             })
     out.sort(key=lambda r: -r["mtime"])
     return out[:limit]
 
 
 def backfill_reports() -> int:
-    """Older warden reports stored the raw event stream instead of the parsed
+    """Older watcher reports stored the raw event stream instead of the parsed
     result, so their session id is present in the text but not as a field. Pull
     it out once so those runs become resumable too."""
-    d = WARDEN_STATE / "reports"
+    d = WATCHER_STATE / "reports"
     if not d.is_dir():
         return 0
     n = 0
@@ -468,7 +506,7 @@ def backfill_reports() -> int:
 
 # ── triggers: what can START a background agent ──────────────────────────────
 # Only one thing on this machine actually launches an agent — journal-notify
-# hands an incident to warden, which runs `claude -p`. It is listed explicitly
+# hands an incident to watcher, which runs `claude -p`. It is listed explicitly
 # rather than discovered, because "does this unit eventually run a Claude
 # agent" is not something you can tell by reading an ExecStart: every other
 # claude-* timer here manages Claude's artifacts (reaping processes, syncing
@@ -477,8 +515,8 @@ def backfill_reports() -> int:
 def triggers() -> list[dict]:
     jn = unit_state("journal-notify.service")
     jn_ok = jn.get("ActiveState") in ("active", "activating")
-    w = warden_state()
-    cfg = warden_config()
+    w = watcher_state()
+    cfg = watcher_config()
 
     armed = jn_ok and w["hook_wired"] and cfg.get("enabled", True)
     budget = w.get("budget") or {}
@@ -492,13 +530,13 @@ def triggers() -> list[dict]:
     if not w["hook_wired"]:
         why.append("hook missing from journal-notify.sh")
     if not cfg.get("enabled", True):
-        why.append("disabled in warden config")
+        why.append("disabled in watcher config")
     if cap and used >= cap:
         why.append(f"daily cap reached ({used}/{cap})")
 
     return [{
-        "name": "warden",
-        "via": "journal-notify.sh → warden triage",
+        "name": "watcher",
+        "via": "journal-notify.sh → watcher triage",
         "armed": armed,
         "why": "; ".join(why),
         "watches": cfg.get("triage_rules", []),
@@ -510,9 +548,9 @@ def triggers() -> list[dict]:
     }]
 
 
-def warden_config() -> dict:
+def watcher_config() -> dict:
     try:
-        return json.loads((HOME / ".config/warden/config.json").read_text())
+        return json.loads((HOME / ".config/watcher/config.json").read_text())
     except (OSError, ValueError):
         return {}
 
@@ -523,7 +561,7 @@ def warden_config() -> dict:
 # incident a trigger then reacts to, so it belongs on the same screen — just not
 # in the same list.
 JOB_UNITS = [
-    ("journal-notify.service", "journal watcher", "watches every unit; feeds warden"),
+    ("journal-notify.service", "journal watcher", "watches every unit; feeds watcher"),
     ("claude-memory-sync.timer", "memory mirror", "syncs ~/.claude memory between hosts"),
     ("claude-reaper.timer", "session reaper", "kills orphaned Claude processes"),
     ("claude-vscode-session-gc.timer", "vscode session gc", "prunes editor session files"),
@@ -583,7 +621,7 @@ def snapshot() -> dict:
     agents_running = [p for p in procs if p.get("kind") == "headless"]
     interactive = [p for p in procs if p.get("kind") in ("interactive", "ide")]
     desktop = next((p for p in procs if p.get("kind") == "desktop"), None)
-    w = warden_state()
+    w = watcher_state()
     trg = triggers()
     jb = jobs()
 
@@ -871,6 +909,15 @@ def cmd_open(args: list) -> int:
         cwd = opt("--cwd") or str(HOME)
         claude = shutil.which("claude") or str(HOME / ".local/bin/claude")
         return spawn_terminal(f"cd {cwd!r} && exec {claude!r} --resume {sid}", prefer)
+
+    if "--focus" in args:
+        pane = opt("--focus")
+        if not pane:
+            return 2
+        # No terminal needed: herdr brings its own pane to the front.
+        subprocess.run(["herdr", "pane", "focus", pane], capture_output=True,
+                       timeout=10, env=clean_env())
+        return 0
 
     if "--herdr" in args:
         # herdr has no "run this command in a new session" flag, so this opens a

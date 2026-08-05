@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-# warden — triage layer for journal-notify.sh.
+# watcher — triage layer for journal-notify.sh.
 #
 # journal-notify.sh (~/.config/hypr/scripts/) already decides what breakage is
 # worth a toast, and does it well: allowlisted rules, a rate catcher for silent
 # error storms, escalating per-(rule,subject) cooldowns, coalescing, a burst
-# cap. warden does NOT re-watch the journal. It hangs off that script's notify()
+# cap. watcher does NOT re-watch the journal. It hangs off that script's notify()
 # choke point and answers the next question — can this be fixed — by handing the
 # incident to a headless Claude Code session.
 #
-#   warden triage <rule> <subject> <body>   entry point, called by journal-notify
-#   warden status                           recent incidents, verdicts, budget
-#   warden fix <id>                         run the session by hand
-#   warden report <id>                      full transcript for one incident
-#   warden test                             inject a synthetic incident
-#   warden doctor                           config, tooling, hook wiring
+#   watcher triage <rule> <subject> <body>   entry point, called by journal-notify
+#   watcher status                           recent incidents, verdicts, budget
+#   watcher fix <id>                         run the session by hand
+#   watcher report <id>                      full transcript for one incident
+#   watcher test                             inject a synthetic incident
+#   watcher doctor                           config, tooling, hook wiring
 #
-# A toast is cheap; a session is not. So warden applies its own gate on top of
+# A toast is cheap; a session is not. So watcher applies its own gate on top of
 # journal-notify's: only `triage_rules` are actionable at all, one incident per
 # fingerprint per `cooldown_min`, and `max_sessions_per_day` overall.
 #
@@ -23,8 +23,8 @@
 # `session_args` is passed verbatim to `claude`. Left at its default the session
 # reads and reports but cannot change anything.
 #
-# Config  ~/.config/warden/config.json
-# State   ~/.local/state/warden/
+# Config  ~/.config/watcher/config.json
+# State   ~/.local/state/watcher/
 
 import fcntl
 import fnmatch
@@ -40,9 +40,9 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-CONFIG_DIR = Path(os.path.expanduser("~/.config/warden"))
+CONFIG_DIR = Path(os.path.expanduser("~/.config/watcher"))
 CONFIG = CONFIG_DIR / "config.json"
-STATE_DIR = Path(os.path.expanduser("~/.local/state/warden"))
+STATE_DIR = Path(os.path.expanduser("~/.local/state/watcher"))
 INCIDENTS = STATE_DIR / "incidents"
 REPORTS = STATE_DIR / "reports"
 STATE = STATE_DIR / "state.json"
@@ -72,7 +72,7 @@ DEFAULTS = {
 
     # Subjects never worth a session, as fnmatch globs.
     "ignore_subjects": [
-        "warden*",
+        "watcher*",
         "app-*.scope",
         "app-com.github.wwmm.easyeffects@autostart.service",
     ],
@@ -133,7 +133,7 @@ def load_state() -> dict:
 
 @contextmanager
 def state_txn():
-    """Locked read-modify-write of state.json. journal-notify can call `warden
+    """Locked read-modify-write of state.json. journal-notify can call `watcher
     triage` several times in quick succession and a session writes its own
     tally, so an unlocked load/save pair silently drops whichever write landed
     in between."""
@@ -151,13 +151,13 @@ def state_txn():
 
 
 def notify(cfg: dict, title: str, body: str = "", urgency: str = "normal") -> None:
-    """warden only ever notifies about ITSELF — a session's verdict, or a reason
+    """watcher only ever notifies about ITSELF — a session's verdict, or a reason
     it declined to run one. Notifying about the incident is journal-notify's
     job and duplicating it is what this rework exists to stop."""
     if not shutil.which("notify-send"):
         return
     try:
-        subprocess.run(["notify-send", "-a", "warden", "-u", urgency, title, body],
+        subprocess.run(["notify-send", "-a", "watcher", "-u", urgency, title, body],
                        timeout=6, check=False)
     except Exception:  # noqa: BLE001 — a notification must never break triage
         pass
@@ -228,13 +228,13 @@ def cmd_triage(cfg: dict, rule: str, subject: str, body: str) -> int:
     (INCIDENTS / f"{inc_id}.json").write_text(json.dumps(inc, indent=2) + "\n")
 
     if not ok:
-        notify(cfg, "warden · no session", f"{subject}\n{why}")
+        notify(cfg, "watcher · no session", f"{subject}\n{why}")
         return 0
     # Detached, resource-capped, and in background.slice so a session yields to
     # the desktop the same way every other batch job here does.
     subprocess.Popen(
         ["systemd-run", "--user", "--quiet", "--collect",
-         f"--unit=warden-session-{fp}", "--slice=background.slice",
+         f"--unit=watcher-session-{fp}", "--slice=background.slice",
          "--property=OOMScoreAdjust=700", "--property=MemoryMax=3G",
          "--property=CPUWeight=20", "--property=Nice=10",
          # Hard ceiling on the whole cgroup. The Python-side timeout on
@@ -253,9 +253,9 @@ def session_budget(cfg: dict, st: dict) -> tuple[bool, str]:
     n = st.setdefault("sessions", {}).get(today, 0)
     cap = int(cfg.get("max_sessions_per_day", 6))
     if n >= cap:
-        return False, f"daily cap reached ({n}/{cap}) — `warden fix <id>` to override"
+        return False, f"daily cap reached ({n}/{cap}) — `watcher fix <id>` to override"
     if LOCK.exists() and time.time() - LOCK.stat().st_mtime < cfg.get("session_timeout_sec", 900):
-        return False, "another warden session is already running"
+        return False, "another watcher session is already running"
     return True, ""
 
 
@@ -326,7 +326,7 @@ find the actual cause.
 {net}
 End your final message with exactly one line, in this form:
 
-WARDEN-VERDICT: fixed|no-change|needs-human — <one sentence, under 100 chars>
+WATCHER-VERDICT: fixed|no-change|needs-human — <one sentence, under 100 chars>
 """
 
 
@@ -361,14 +361,14 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
     if not path.exists():
         matches = sorted(INCIDENTS.glob(f"*{inc_id}*.json"))
         if not matches:
-            sys.stderr.write(f"warden: no incident '{inc_id}'\n")
+            sys.stderr.write(f"watcher: no incident '{inc_id}'\n")
             return 2
         path = matches[-1]
     inc = json.loads(path.read_text())
 
     claude = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
     if not os.path.exists(claude):
-        notify(cfg, "warden · no session", "claude CLI not found")
+        notify(cfg, "watcher · no session", "claude CLI not found")
         return 1
 
     REPORTS.mkdir(parents=True, exist_ok=True)
@@ -384,7 +384,7 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
 
     extra = [str(a) for a in cfg.get("session_args", [])]
     may_change = bool(extra)   # an unelevated session cannot edit anything anyway
-    pre = snapper_snapshot(f"warden pre {inc_id} ({inc['subject']})") if may_change else None
+    pre = snapper_snapshot(f"watcher pre {inc_id} ({inc['subject']})") if may_change else None
     prompt = build_prompt(inc, unit_context(inc.get("unit", "")), may_change)
     started = time.time()
     try:
@@ -397,13 +397,13 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
         raw = p.stdout
     except subprocess.TimeoutExpired:
         raw, p = "", None
-    post = snapper_snapshot(f"warden post {inc_id}") if may_change else None
+    post = snapper_snapshot(f"watcher post {inc_id}") if may_change else None
 
     text, cost, session_id = parse_session_output(raw)
     if not text:
         text = (p.stderr.strip()[:2000] if p else "session timed out")
 
-    m = re.search(r"WARDEN-VERDICT:\s*(fixed|no-change|needs-human)\s*[—-]\s*(.+)",
+    m = re.search(r"WATCHER-VERDICT:\s*(fixed|no-change|needs-human)\s*[—-]\s*(.+)",
                   text, re.I)
     verdict = m.group(1).lower() if m else "unknown"
     if m:
@@ -435,8 +435,8 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
     if verified is False:
         icon, verdict = "✗", "still failing"
     tail = f"\nrevert: undo <path> {pre}" if pre else ""
-    notify(cfg, f"{icon} warden · {inc['subject']}",
-           f"{summary}{tail}\nwarden report {inc_id}",
+    notify(cfg, f"{icon} watcher · {inc['subject']}",
+           f"{summary}{tail}\nwatcher report {inc_id}",
            urgency="critical" if verdict in ("needs-human", "still failing") else "normal")
     print(f"{verdict}: {summary}")
     return 0
@@ -447,13 +447,13 @@ JOURNAL_NOTIFY = Path(os.path.expanduser("~/.config/hypr/scripts/journal-notify.
 
 
 def hook_wired() -> bool:
-    """The hook is a shell function calling "$WARDEN" triage, so grepping the
-    script for the literal string `warden triage` reports a false negative."""
+    """The hook is a shell function calling "$WATCHER" triage, so grepping the
+    script for the literal string `watcher triage` reports a false negative."""
     try:
         text = JOURNAL_NOTIFY.read_text(errors="ignore")
     except OSError:
         return False
-    return 'triage "$rule"' in text and "WARDEN" in text
+    return 'triage "$rule"' in text and "WATCHER" in text
 
 
 # ── reporting ────────────────────────────────────────────────────────────────
@@ -492,7 +492,7 @@ def cmd_status(cfg: dict) -> int:
 def cmd_report(inc_id: str) -> int:
     matches = sorted(REPORTS.glob(f"*{inc_id}*.json"))
     if not matches:
-        sys.stderr.write(f"warden: no report for '{inc_id}'\n")
+        sys.stderr.write(f"watcher: no report for '{inc_id}'\n")
         return 2
     r = json.loads(matches[-1].read_text())
     inc = r["incident"]
@@ -517,7 +517,7 @@ def cmd_doctor(cfg: dict) -> int:
     print(f"{'✓' if os.path.exists(claude) else '✗'} {'claude':14} {claude}")
 
     wired = hook_wired()
-    print(f"{'✓' if wired else '✗'} journal-notify.sh calls `warden triage`  ({JOURNAL_NOTIFY})")
+    print(f"{'✓' if wired else '✗'} journal-notify.sh calls `watcher triage`  ({JOURNAL_NOTIFY})")
     ok &= wired
     rc, _ = run(["systemctl", "--user", "is-active", "journal-notify.service"], timeout=10)
     if rc != 0:
@@ -535,13 +535,13 @@ def cmd_doctor(cfg: dict) -> int:
 
 
 def cmd_test(cfg: dict) -> int:
-    # Not named warden-* — that is in ignore_subjects, so the self-test would
-    # be silently swallowed by warden's own filter and look like a broken hook.
+    # Not named watcher-* — that is in ignore_subjects, so the self-test would
+    # be silently swallowed by watcher's own filter and look like a broken hook.
     subject = "selftest-probe.service"
     cmd_triage(cfg, "unitfail", subject,
                f"{subject}: Failed with result 'exit-code'. This is a synthetic "
-               "incident from `warden test`; change nothing and reply needs-human.")
-    print(f"injected {subject} — `warden status` in a minute or two")
+               "incident from `watcher test`; change nothing and reply needs-human.")
+    print(f"injected {subject} — `watcher status` in a minute or two")
     return 0
 
 
@@ -555,7 +555,7 @@ def main() -> int:
     cmd, rest = args[0], args[1:]
     if cmd == "triage":
         if len(rest) < 2:
-            sys.stderr.write("warden: triage needs <rule> <subject> [body]\n")
+            sys.stderr.write("watcher: triage needs <rule> <subject> [body]\n")
             return 2
         return cmd_triage(cfg, rest[0], rest[1], " ".join(rest[2:]))
     if cmd == "fix":
@@ -568,7 +568,7 @@ def main() -> int:
         return cmd_test(cfg)
     if cmd == "doctor":
         return cmd_doctor(cfg)
-    sys.stderr.write(f"warden: unknown command '{cmd}'\n")
+    sys.stderr.write(f"watcher: unknown command '{cmd}'\n")
     return 2
 
 

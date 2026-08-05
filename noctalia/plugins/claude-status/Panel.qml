@@ -1,23 +1,19 @@
 // Panel.qml — the detail view opened by clicking the bar pill.
 //
-// Ordered by what you cannot find out any other way:
-//   1. TRIGGERS  — what is armed to start an agent. If nothing is watching,
-//                  nothing will tell you that; it has to be the first thing.
-//   2. AGENTS    — background runs happening now, and whether each is actually
-//                  producing output. A wedged headless run has the same uptime
-//                  and memory as a working one; only its transcript separates
-//                  them, so "last output" gets its own column and drives the dot.
-//   3. RUNS      — what recent agents concluded, and what they cost.
-//   4. JOBS      — the Claude housekeeping that does NOT start agents, listed
-//                  separately so it never inflates the trigger count. A failing
-//                  one is usually what produces the incident a trigger reacts to.
+// Layout: a two-column top row (trigger state beside a square system tracker),
+// then full-width stacked cards, then the pit crew as a two-column grid.
 //
-// Interactive sessions are a one-line footnote on purpose. You are looking at
-// those already; they are not what this panel is for.
+// SESSIONS shows four rows and hides the rest behind a toggle — the list is
+// unbounded and a panel that grows with your history is unusable.
 //
-// Every section sits inside an opaque NBox. Noctalia panels honour a
-// user-configured background opacity, so content placed directly on the panel
-// shows the desktop through it and becomes unreadable over a busy wallpaper.
+// Titles come from herdr where the session lives in a pane, because that is the
+// title Claude actually generated for it; otherwise they are derived from the
+// first prompt. A session in a herdr pane is FOCUSED rather than reopened —
+// launching herdr inside herdr is refused ("nested herdr is disabled").
+//
+// Every card is an opaque NBox: noctalia honours a user-set panel background
+// opacity, so anything placed straight on the panel is unreadable over a busy
+// wallpaper.
 
 import QtQuick
 import QtQuick.Layouts
@@ -31,24 +27,25 @@ Item {
   property var pluginApi
   readonly property var svc: pluginApi ? pluginApi.mainInstance : null
 
-  property int contentPreferredWidth: 580
-  property int contentPreferredHeight: Math.min(860, col.implicitHeight + Style.marginL * 2)
+  property int contentPreferredWidth: 620
+  property int contentPreferredHeight: Math.min(880, col.implicitHeight + Style.marginL * 2)
   property color panelBackgroundColor: Color.mSurface
 
   readonly property color cMuted: Color.mOnSurfaceVariant
+  property bool showAllSessions: false
+
+  readonly property int sessionCount: svc ? svc.sessions.length : 0
+  readonly property var shownSessions: {
+    if (!svc)
+      return [];
+    return showAllSessions ? svc.sessions : svc.sessions.slice(0, 4);
+  }
 
   function agentColor(a) {
     var idle = svc ? svc.idleOf(a) : -1;
     if (idle < 0)
       return Color.mSecondary;
     return idle > (svc ? svc.idleWarnSec : 300) ? Color.mError : Color.mPrimary;
-  }
-
-  function verdictIcon(v) {
-    return v === "fixed" ? "✓" : (v === "needs-human" ? "✋" : (v === "still failing" ? "✗" : "·"));
-  }
-  function verdictColor(v) {
-    return v === "fixed" ? Color.mPrimary : ((v === "needs-human" || v === "still failing") ? Color.mError : root.cMuted);
   }
 
   ColumnLayout {
@@ -58,26 +55,141 @@ Item {
     width: root.width - Style.marginL * 2
     spacing: Style.marginM
 
-    // ── header ───────────────────────────────────────────────────────────────
+    // ── top row: trigger state | system tracker ──────────────────────────────
     RowLayout {
       Layout.fillWidth: true
-      spacing: Style.marginS
+      spacing: Style.marginM
 
-      NText {
-        text: "Background agents"
-        pointSize: Style.fontSizeL
-        font.weight: Style.fontWeightBold
-        color: Color.mOnSurface
-      }
-      Item {
+      NBox {
         Layout.fillWidth: true
+        Layout.preferredHeight: 132
+        forceOpaque: true
+
+        ColumnLayout {
+          anchors.fill: parent
+          anchors.margins: Style.marginM
+          spacing: 2
+
+          NText {
+            text: "TRIGGER"
+            pointSize: Style.fontSizeXS
+            font.weight: Style.fontWeightSemiBold
+            color: root.cMuted
+          }
+
+          Repeater {
+            model: svc ? svc.triggers : []
+            delegate: ColumnLayout {
+              Layout.fillWidth: true
+              spacing: 1
+
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: Style.marginS
+                Rectangle {
+                  Layout.alignment: Qt.AlignVCenter
+                  implicitWidth: 8
+                  implicitHeight: 8
+                  radius: 4
+                  color: modelData.armed ? Color.mPrimary : Color.mError
+                }
+                NText {
+                  text: modelData.name
+                  pointSize: Style.fontSizeS
+                  font.weight: Style.fontWeightSemiBold
+                  color: Color.mOnSurface
+                }
+                NText {
+                  text: modelData.armed ? "armed" : "NOT ARMED"
+                  pointSize: Style.fontSizeXS
+                  color: modelData.armed ? root.cMuted : Color.mError
+                }
+              }
+              NText {
+                Layout.fillWidth: true
+                text: "starts an agent when: " + ((modelData.watches || []).join(", ") || "nothing")
+                pointSize: Style.fontSizeXS
+                color: root.cMuted
+                wrapMode: Text.WordWrap
+              }
+              NText {
+                Layout.fillWidth: true
+                text: modelData.authority + " · " + (modelData.model || "")
+                pointSize: Style.fontSizeXS
+                color: modelData.authority === "read-only" ? Color.mSecondary : root.cMuted
+              }
+              NText {
+                Layout.fillWidth: true
+                visible: !modelData.armed && modelData.why
+                text: modelData.why || ""
+                pointSize: Style.fontSizeXS
+                color: Color.mError
+                wrapMode: Text.WordWrap
+              }
+            }
+          }
+          Item {
+            Layout.fillHeight: true
+          }
+        }
       }
-      NIconButton {
-        icon: "refresh"
-        baseSize: Style.baseWidgetSize * 0.7
-        onClicked: {
-          if (svc)
-            svc.refresh();
+
+      // The square tracker: the whole system in a handful of numbers.
+      NBox {
+        Layout.preferredWidth: 132
+        Layout.preferredHeight: 132
+        forceOpaque: true
+
+        ColumnLayout {
+          anchors.fill: parent
+          anchors.margins: Style.marginM
+          spacing: 1
+
+          NText {
+            text: "SYSTEM"
+            pointSize: Style.fontSizeXS
+            font.weight: Style.fontWeightSemiBold
+            color: root.cMuted
+          }
+          NText {
+            Layout.alignment: Qt.AlignHCenter
+            text: svc ? String(svc.runningCount) : "–"
+            pointSize: Style.fontSizeXXL
+            font.weight: Style.fontWeightBold
+            color: svc && svc.runningCount > 0 ? Color.mPrimary : root.cMuted
+          }
+          NText {
+            Layout.alignment: Qt.AlignHCenter
+            text: "agents running"
+            pointSize: Style.fontSizeXS
+            color: root.cMuted
+          }
+          Item {
+            Layout.fillHeight: true
+          }
+          NText {
+            Layout.fillWidth: true
+            text: root.sessionCount + " sessions"
+            pointSize: Style.fontSizeXS
+            color: root.cMuted
+          }
+          NText {
+            Layout.fillWidth: true
+            text: {
+              if (!svc || !svc.triggers.length)
+                return "no trigger";
+              var b = svc.triggers[0].budget || {};
+              return "budget " + (b.used !== undefined ? b.used : "?") + "/" + (b.cap !== undefined ? b.cap : "?");
+            }
+            pointSize: Style.fontSizeXS
+            color: root.cMuted
+          }
+          NText {
+            Layout.fillWidth: true
+            text: svc ? (svc.alerts.length + " alert" + (svc.alerts.length === 1 ? "" : "s")) : ""
+            pointSize: Style.fontSizeXS
+            color: svc && svc.alerts.length ? Color.mError : root.cMuted
+          }
         }
       }
     }
@@ -118,107 +230,117 @@ Item {
       }
     }
 
-    // ── 1. triggers ──────────────────────────────────────────────────────────
-    NText {
-      text: "TRIGGERS"
-      pointSize: Style.fontSizeXS
-      font.weight: Style.fontWeightSemiBold
-      color: root.cMuted
+    // ── sessions ─────────────────────────────────────────────────────────────
+    RowLayout {
+      Layout.fillWidth: true
+      NText {
+        text: "SESSIONS"
+        pointSize: Style.fontSizeXS
+        font.weight: Style.fontWeightSemiBold
+        color: root.cMuted
+      }
+      Item {
+        Layout.fillWidth: true
+      }
+      NText {
+        visible: root.sessionCount > 4
+        text: root.showAllSessions ? "show less" : ("show all " + root.sessionCount)
+        pointSize: Style.fontSizeXS
+        color: Color.mPrimary
+
+        MouseArea {
+          anchors.fill: parent
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.showAllSessions = !root.showAllSessions
+        }
+      }
     }
 
     NBox {
       Layout.fillWidth: true
       forceOpaque: true
-      implicitHeight: trgCol.implicitHeight + Style.marginM * 2
+      implicitHeight: sessCol.implicitHeight + Style.marginM * 2
 
       ColumnLayout {
-        id: trgCol
+        id: sessCol
         anchors.fill: parent
         anchors.margins: Style.marginM
-        spacing: Style.marginS
+        spacing: Style.marginXS
 
         NText {
           Layout.fillWidth: true
-          visible: svc && svc.triggers.length === 0
-          text: "Nothing is wired to start an agent."
+          visible: root.sessionCount === 0
+          text: "No sessions on disk."
           pointSize: Style.fontSizeXS
-          color: Color.mError
+          color: root.cMuted
         }
 
         Repeater {
-          model: svc ? svc.triggers : []
-          delegate: ColumnLayout {
+          model: root.shownSessions
+          delegate: RowLayout {
             Layout.fillWidth: true
-            spacing: 1
+            spacing: Style.marginS
 
-            RowLayout {
+            Rectangle {
+              Layout.alignment: Qt.AlignVCenter
+              implicitWidth: 8
+              implicitHeight: 8
+              radius: 4
+              color: modelData.agent_status === "working" ? Color.mPrimary : (modelData.live ? Color.mSecondary : root.cMuted)
+            }
+            ColumnLayout {
               Layout.fillWidth: true
-              spacing: Style.marginS
-              Rectangle {
-                Layout.alignment: Qt.AlignVCenter
-                implicitWidth: 8
-                implicitHeight: 8
-                radius: 4
-                color: modelData.armed ? Color.mPrimary : Color.mError
-              }
+              spacing: 0
               NText {
-                text: modelData.name
-                pointSize: Style.fontSizeS
-                color: Color.mOnSurface
-                font.weight: Style.fontWeightSemiBold
-              }
-              NText {
-                text: modelData.armed ? "armed" : "NOT ARMED"
-                pointSize: Style.fontSizeXS
-                color: modelData.armed ? root.cMuted : Color.mError
-              }
-              Item {
                 Layout.fillWidth: true
+                text: modelData.title && modelData.title !== "" ? modelData.title : (modelData.session_id || "").substring(0, 8)
+                pointSize: Style.fontSizeXS
+                color: modelData.exists ? Color.mOnSurface : root.cMuted
+                elide: Text.ElideRight
               }
               NText {
-                text: modelData.authority || ""
+                Layout.fillWidth: true
+                text: (modelData.project || "?") + (modelData.pane_id ? "  ·  in herdr" : "")
                 pointSize: Style.fontSizeXS
                 color: root.cMuted
+                elide: Text.ElideMiddle
               }
             }
             NText {
-              Layout.fillWidth: true
-              text: modelData.via || ""
+              text: svc ? svc.fmtAgo(modelData.age_sec) : ""
               pointSize: Style.fontSizeXS
               color: root.cMuted
+              Layout.preferredWidth: 40
+              horizontalAlignment: Text.AlignRight
             }
-            NText {
-              Layout.fillWidth: true
-              text: "watches " + ((modelData.watches || []).join(", ") || "nothing")
-              pointSize: Style.fontSizeXS
-              color: root.cMuted
-              wrapMode: Text.WordWrap
-            }
-            NText {
-              Layout.fillWidth: true
-              text: {
-                var b = modelData.budget || {};
-                return "budget " + (b.used !== undefined ? b.used : "?") + "/" + (b.cap !== undefined ? b.cap : "?") + " today · cooldown " + (modelData.cooldown_min || "?") + "min · " + (modelData.model || "");
+            // In a herdr pane → focus it, which is a true foreground switch and
+            // avoids launching herdr inside herdr. Otherwise reopen it in a
+            // terminal. A live session is never resumed: that would put a
+            // second writer on its transcript.
+            NIconButton {
+              icon: modelData.pane_id ? "arrow-right" : (modelData.live ? "eye" : "player-play")
+              baseSize: Style.baseWidgetSize * 0.55
+              tooltipText: modelData.pane_id ? "Jump to this session in herdr" : (modelData.live ? "Watch this session's output" : "Reopen in a terminal")
+              onClicked: {
+                if (!svc)
+                  return;
+                if (modelData.pane_id)
+                  svc.focusPane(modelData.pane_id);
+                else if (modelData.live)
+                  svc.followAgent(modelData.session_id);
+                else
+                  svc.resumeSession(modelData.session_id, modelData.cwd);
               }
-              pointSize: Style.fontSizeXS
-              color: root.cMuted
-            }
-            NText {
-              Layout.fillWidth: true
-              visible: !modelData.armed && modelData.why
-              text: modelData.why || ""
-              pointSize: Style.fontSizeXS
-              color: Color.mError
-              wrapMode: Text.WordWrap
             }
           }
         }
       }
     }
 
-    // ── 2. agents running ────────────────────────────────────────────────────
+    // ── agents running ───────────────────────────────────────────────────────
     NText {
-      text: svc ? ("AGENTS RUNNING · " + svc.runningCount) : "AGENTS RUNNING"
+      visible: svc && svc.runningCount > 0
+      text: "AGENTS RUNNING"
       pointSize: Style.fontSizeXS
       font.weight: Style.fontWeightSemiBold
       color: root.cMuted
@@ -226,6 +348,7 @@ Item {
 
     NBox {
       Layout.fillWidth: true
+      visible: svc && svc.runningCount > 0
       forceOpaque: true
       implicitHeight: runCol.implicitHeight + Style.marginM * 2
 
@@ -234,14 +357,6 @@ Item {
         anchors.fill: parent
         anchors.margins: Style.marginM
         spacing: Style.marginXS
-
-        NText {
-          Layout.fillWidth: true
-          visible: svc && svc.runningCount === 0
-          text: "None. Nothing is running unattended right now."
-          pointSize: Style.fontSizeXS
-          color: root.cMuted
-        }
 
         Repeater {
           model: svc ? svc.running : []
@@ -259,7 +374,7 @@ Item {
             NText {
               Layout.fillWidth: true
               text: modelData.project || "?"
-              pointSize: Style.fontSizeS
+              pointSize: Style.fontSizeXS
               color: Color.mOnSurface
               elide: Text.ElideMiddle
             }
@@ -267,15 +382,6 @@ Item {
               text: svc ? ("up " + svc.fmtAgo(modelData.runtime_sec)) : ""
               pointSize: Style.fontSizeXS
               color: root.cMuted
-              Layout.preferredWidth: 52
-              horizontalAlignment: Text.AlignRight
-            }
-            NText {
-              text: svc ? svc.fmtMb(modelData.rss_mb) : ""
-              pointSize: Style.fontSizeXS
-              color: root.cMuted
-              Layout.preferredWidth: 48
-              horizontalAlignment: Text.AlignRight
             }
             NText {
               text: {
@@ -286,29 +392,16 @@ Item {
               }
               pointSize: Style.fontSizeXS
               color: root.agentColor(modelData)
-              Layout.preferredWidth: 76
-              horizontalAlignment: Text.AlignRight
             }
-            // A live agent is headless — there is no terminal to attach to, so
-            // this follows its transcript instead of pretending to join it.
             NIconButton {
               icon: "eye"
               baseSize: Style.baseWidgetSize * 0.55
               enabled: !!modelData.session_id
               opacity: enabled ? 1 : 0.35
-              tooltipText: "Watch this agent's output in a terminal"
+              tooltipText: "Watch this agent's output"
               onClicked: {
                 if (svc)
                   svc.followAgent(modelData.session_id);
-              }
-            }
-            NIconButton {
-              icon: "layout-columns"
-              baseSize: Style.baseWidgetSize * 0.55
-              tooltipText: "Open a herdr workspace here"
-              onClicked: {
-                if (svc)
-                  svc.openHerdr(modelData.cwd, modelData.project);
               }
             }
           }
@@ -316,12 +409,10 @@ Item {
       }
     }
 
-    // ── 3. sessions you can reopen ───────────────────────────────────────────
-    // Background agents are rare by design, so a panel that can only act on a
-    // live one gives you nothing to click most of the time. Every session here
-    // reopens with `claude --resume` in the directory it ran in.
+    // ── triage results ───────────────────────────────────────────────────────
     NText {
-      text: "SESSIONS · click ▶ to open in a terminal"
+      visible: svc && svc.recent.length > 0
+      text: "TRIAGE RESULTS · what the trigger's agents concluded"
       pointSize: Style.fontSizeXS
       font.weight: Style.fontWeightSemiBold
       color: root.cMuted
@@ -329,100 +420,7 @@ Item {
 
     NBox {
       Layout.fillWidth: true
-      forceOpaque: true
-      implicitHeight: sessCol.implicitHeight + Style.marginM * 2
-
-      ColumnLayout {
-        id: sessCol
-        anchors.fill: parent
-        anchors.margins: Style.marginM
-        spacing: Style.marginXS
-
-        NText {
-          Layout.fillWidth: true
-          visible: svc && svc.sessions.length === 0
-          text: "No sessions on disk."
-          pointSize: Style.fontSizeXS
-          color: root.cMuted
-        }
-
-        Repeater {
-          model: svc ? svc.sessions.slice(0, 8) : []
-          delegate: RowLayout {
-            Layout.fillWidth: true
-            spacing: Style.marginS
-
-            Rectangle {
-              Layout.alignment: Qt.AlignVCenter
-              implicitWidth: 8
-              implicitHeight: 8
-              radius: 4
-              color: modelData.live ? Color.mPrimary : root.cMuted
-            }
-            ColumnLayout {
-              Layout.fillWidth: true
-              spacing: 0
-              NText {
-                Layout.fillWidth: true
-                text: modelData.title && modelData.title !== "" ? modelData.title : (modelData.session_id || "").substring(0, 8)
-                pointSize: Style.fontSizeXS
-                color: modelData.exists ? Color.mOnSurface : root.cMuted
-                elide: Text.ElideRight
-              }
-              NText {
-                Layout.fillWidth: true
-                text: modelData.project || "?"
-                pointSize: Style.fontSizeXS
-                color: root.cMuted
-                elide: Text.ElideMiddle
-              }
-            }
-            NText {
-              text: svc ? svc.fmtAgo(modelData.age_sec) : ""
-              pointSize: Style.fontSizeXS
-              color: root.cMuted
-              Layout.preferredWidth: 44
-              horizontalAlignment: Text.AlignRight
-            }
-            // A live session must not be resumed — that would put a second
-            // writer on its transcript — so it offers follow instead.
-            NIconButton {
-              icon: modelData.live ? "eye" : "player-play"
-              baseSize: Style.baseWidgetSize * 0.55
-              tooltipText: modelData.live ? "Follow this live session" : ("Resume in " + (modelData.cwd || "~"))
-              onClicked: {
-                if (!svc)
-                  return;
-                if (modelData.live)
-                  svc.followAgent(modelData.session_id);
-                else
-                  svc.resumeSession(modelData.session_id, modelData.cwd);
-              }
-            }
-            NIconButton {
-              icon: "layout-columns"
-              baseSize: Style.baseWidgetSize * 0.55
-              tooltipText: "Open a herdr workspace here"
-              onClicked: {
-                if (svc)
-                  svc.openHerdr(modelData.cwd, modelData.project);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // ── 4. recent runs ───────────────────────────────────────────────────────
-    NText {
-      text: "RECENT RUNS"
-      pointSize: Style.fontSizeXS
-      font.weight: Style.fontWeightSemiBold
-      color: root.cMuted
-    }
-
-    NBox {
-      Layout.fillWidth: true
+      visible: svc && svc.recent.length > 0
       forceOpaque: true
       implicitHeight: recCol.implicitHeight + Style.marginM * 2
 
@@ -432,75 +430,41 @@ Item {
         anchors.margins: Style.marginM
         spacing: Style.marginXS
 
-        NText {
-          Layout.fillWidth: true
-          visible: svc && svc.recent.length === 0
-          text: "No agent has run yet."
-          pointSize: Style.fontSizeXS
-          color: root.cMuted
-        }
-
         Repeater {
-          model: svc ? svc.recent.slice(0, 5) : []
+          model: svc ? svc.recent.slice(0, 4) : []
           delegate: RowLayout {
             Layout.fillWidth: true
             spacing: Style.marginS
-
             NText {
-              text: root.verdictIcon(modelData.verdict)
-              color: root.verdictColor(modelData.verdict)
-              pointSize: Style.fontSizeS
-              Layout.preferredWidth: 16
+              text: modelData.verdict === "fixed" ? "✓" : (modelData.verdict === "needs-human" ? "✋" : "·")
+              color: modelData.verdict === "fixed" ? Color.mPrimary : (modelData.verdict === "needs-human" ? Color.mError : root.cMuted)
+              pointSize: Style.fontSizeXS
+              Layout.preferredWidth: 14
             }
-            ColumnLayout {
+            NText {
               Layout.fillWidth: true
-              spacing: 0
-              NText {
-                Layout.fillWidth: true
-                text: modelData.subject || "?"
-                pointSize: Style.fontSizeXS
-                color: Color.mOnSurface
-                elide: Text.ElideMiddle
-              }
-              NText {
-                Layout.fillWidth: true
-                text: modelData.summary || ""
-                pointSize: Style.fontSizeXS
-                color: root.cMuted
-                elide: Text.ElideRight
-              }
-            }
-            NText {
-              text: modelData.cost_usd ? ("$" + modelData.cost_usd.toFixed(2)) : "—"
+              text: modelData.summary || modelData.subject || ""
               pointSize: Style.fontSizeXS
               color: root.cMuted
-              Layout.preferredWidth: 44
-              horizontalAlignment: Text.AlignRight
+              elide: Text.ElideRight
             }
-            // Reopen a finished run as a real interactive session, in the
-            // directory it ran in. Runs from before session ids were recorded
-            // have nothing to resume, so the button greys out rather than
-            // silently doing nothing.
             NIconButton {
               icon: "player-play"
               baseSize: Style.baseWidgetSize * 0.55
               enabled: svc ? svc.canResume(modelData) : false
               opacity: enabled ? 1 : 0.3
-              tooltipText: enabled ? "Resume this session in a terminal" : "no session id recorded for this run"
+              tooltipText: enabled ? "Reopen this run" : "no session id recorded"
               onClicked: {
                 if (svc)
                   svc.resumeSession(modelData.session_id, modelData.cwd);
               }
             }
-
           }
         }
       }
     }
 
-    // ── 5. pit crew ──────────────────────────────────────────────────────────
-    // The scripts that keep Claude tidy and its data in sync. They never start
-    // an agent — kept visually distinct from TRIGGERS for exactly that reason.
+    // ── pit crew ─────────────────────────────────────────────────────────────
     NText {
       text: "PIT CREW · keeps things running, never starts an agent"
       pointSize: Style.fontSizeXS
@@ -508,103 +472,77 @@ Item {
       color: root.cMuted
     }
 
-    Repeater {
-      model: svc ? svc.jobs : []
-      delegate: NBox {
-        Layout.fillWidth: true
-        forceOpaque: true
-        implicitHeight: jobRow.implicitHeight + Style.marginM * 2
+    GridLayout {
+      Layout.fillWidth: true
+      columns: 2
+      columnSpacing: Style.marginM
+      rowSpacing: Style.marginM
 
-        ColumnLayout {
-          id: jobRow
-          anchors.fill: parent
-          anchors.margins: Style.marginM
-          spacing: 2
+      Repeater {
+        model: svc ? svc.jobs : []
+        delegate: NBox {
+          Layout.fillWidth: true
+          Layout.preferredHeight: crewCol.implicitHeight + Style.marginM * 2
+          forceOpaque: true
 
-          RowLayout {
-            Layout.fillWidth: true
-            spacing: Style.marginS
+          ColumnLayout {
+            id: crewCol
+            anchors.fill: parent
+            anchors.margins: Style.marginM
+            spacing: 1
 
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.marginS
+              // A plain dot, not a pill. A pill has to size itself around its
+              // own label, and the label clipped out of it as the state text
+              // grew.
+              Rectangle {
+                Layout.alignment: Qt.AlignVCenter
+                implicitWidth: 8
+                implicitHeight: 8
+                radius: 4
+                color: modelData.ok ? Color.mPrimary : Color.mError
+              }
+              NText {
+                Layout.fillWidth: true
+                text: modelData.name
+                pointSize: Style.fontSizeXS
+                font.weight: Style.fontWeightSemiBold
+                color: Color.mOnSurface
+                elide: Text.ElideRight
+              }
+              NIconButton {
+                icon: "edit"
+                baseSize: Style.baseWidgetSize * 0.5
+                enabled: !!modelData.script
+                opacity: enabled ? 1 : 0.3
+                tooltipText: modelData.script || "no script for this unit"
+                onClicked: {
+                  if (svc)
+                    svc.openScript(modelData.script);
+                }
+              }
+            }
             NText {
               Layout.fillWidth: true
-              text: modelData.name
-              pointSize: Style.fontSizeS
-              font.weight: Style.fontWeightSemiBold
-              color: Color.mOnSurface
+              text: modelData.ok ? "online" : (modelData.state || "failing")
+              pointSize: Style.fontSizeXS
+              color: modelData.ok ? Color.mPrimary : Color.mError
+            }
+            NText {
+              Layout.fillWidth: true
+              visible: !modelData.ok && modelData.detail
+              text: modelData.detail || ""
+              pointSize: Style.fontSizeXS
+              color: Color.mError
+              wrapMode: Text.WordWrap
+              maximumLineCount: 3
               elide: Text.ElideRight
             }
-
-            // Status pill — green when healthy, red when its last run failed.
-            Rectangle {
-              implicitHeight: pillText.implicitHeight + 4
-              implicitWidth: pillText.implicitWidth + Style.marginM
-              radius: height / 2
-              color: modelData.ok ? Qt.rgba(Color.mPrimary.r, Color.mPrimary.g, Color.mPrimary.b, 0.18) : Qt.rgba(Color.mError.r, Color.mError.g, Color.mError.b, 0.18)
-              border.width: 1
-              border.color: modelData.ok ? Color.mPrimary : Color.mError
-
-              RowLayout {
-                anchors.centerIn: parent
-                spacing: 4
-                Rectangle {
-                  implicitWidth: 6
-                  implicitHeight: 6
-                  radius: 3
-                  color: modelData.ok ? Color.mPrimary : Color.mError
-                }
-                NText {
-                  id: pillText
-                  text: modelData.ok ? "online" : "failing"
-                  pointSize: Style.fontSizeXS
-                  color: modelData.ok ? Color.mPrimary : Color.mError
-                }
-              }
-            }
-
-            NIconButton {
-              icon: "edit"
-              baseSize: Style.baseWidgetSize * 0.55
-              enabled: !!modelData.script
-              opacity: enabled ? 1 : 0.3
-              tooltipText: modelData.script ? ("Edit " + modelData.script) : "no script for this unit"
-              onClicked: {
-                if (svc)
-                  svc.openScript(modelData.script);
-              }
-            }
-          }
-
-          NText {
-            Layout.fillWidth: true
-            text: modelData.what || ""
-            pointSize: Style.fontSizeXS
-            color: root.cMuted
-            wrapMode: Text.WordWrap
-          }
-          NText {
-            Layout.fillWidth: true
-            visible: !modelData.ok && modelData.detail
-            text: modelData.detail || ""
-            pointSize: Style.fontSizeXS
-            color: Color.mError
-            wrapMode: Text.WordWrap
           }
         }
       }
-    }
-
-    // ── footnote ─────────────────────────────────────────────────────────────
-    NText {
-      Layout.fillWidth: true
-      text: {
-        if (!svc || !svc.interactive)
-          return "";
-        var d = svc.interactive.desktop;
-        return svc.interactive.count + " interactive session(s) open" + (d ? " · Claude Desktop " + d.procs + " procs" : "") + " — not agents.";
-      }
-      pointSize: Style.fontSizeXS
-      color: root.cMuted
-      wrapMode: Text.WordWrap
     }
   }
 }
