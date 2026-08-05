@@ -373,12 +373,53 @@ WATCHER-VERDICT: fixed|no-change|needs-human — <one sentence, under 100 chars>
 """
 
 
+def scan_json(raw: str) -> list:
+    """Every complete JSON value in `raw`, in order.
+
+    Handles the three shapes `claude -p` actually produces: one object, an array
+    of events, and a bare stream of objects — and, unlike json.loads, keeps what
+    arrived when the tail is cut off mid-object, which is what a timed-out or
+    killed session leaves behind."""
+    dec, out, i, n = json.JSONDecoder(), [], 0, len(raw)
+    while i < n:
+        if raw[i] in " \t\r\n,[]":
+            i += 1
+            continue
+        try:
+            obj, i = dec.raw_decode(raw, i)
+        except ValueError:
+            break            # truncated tail; everything before it still counts
+        out.append(obj)
+    return out
+
+
+def assistant_text(objs: list) -> str:
+    """The assistant's own words out of a stream of events, in order."""
+    parts = []
+    for o in objs:
+        if not isinstance(o, dict) or o.get("type") != "assistant":
+            continue
+        content = (o.get("message") or {}).get("content") if isinstance(o.get("message"), dict) else None
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            parts += [b["text"] for b in content
+                      if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
+    return "\n".join(parts).strip()
+
+
 def parse_session_output(raw: str) -> tuple[str, float | None, str]:
     """`claude -p --output-format json` does not always return one object. It
     can emit the whole stream as an array of events, in which case the answer is
     the last element with type "result" — treating that array as a dict loses
     the text, the cost and the session id, and stores the raw event dump as the
     report.
+
+    A session that times out or is killed leaves that stream truncated, and then
+    json.loads fails on the lot. Salvage the complete events instead of handing
+    back the raw dump: the dump is one long line, so a verdict line inside it
+    runs straight into `"}],"stop_reason":null,…` and that ends up as the
+    summary.
 
     The session id is worth keeping: it is what `claude --resume <id>` needs to
     reopen an agent's run interactively, which is the only way to read what it
@@ -389,14 +430,39 @@ def parse_session_output(raw: str) -> tuple[str, float | None, str]:
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
-        return raw.strip(), None, ""
+        data = None
     if isinstance(data, dict):
         return _from(data)
-    if isinstance(data, list):
-        for item in reversed(data):
-            if isinstance(item, dict) and item.get("type") == "result":
-                return _from(item)
-    return raw.strip(), None, ""
+
+    objs = data if isinstance(data, list) else scan_json(raw or "")
+    for item in reversed(objs):
+        if isinstance(item, dict) and item.get("type") == "result":
+            return _from(item)
+
+    # No result event — the run was cut short. Keep whatever it managed to say
+    # and whichever ids reached us.
+    def _last(key):
+        return next((o[key] for o in reversed(objs)
+                     if isinstance(o, dict) and o.get(key) is not None), None)
+    text = assistant_text(objs)
+    return (text or (raw or "").strip(),
+            _last("total_cost_usd"), _last("session_id") or "")
+
+
+def clean_summary(text: str, limit: int = 200) -> str:
+    """One line of prose, with any JSON envelope trimmed off the end.
+
+    Belt and braces behind parse_session_output: if a raw dump ever reaches
+    here, the summary stops at the sentence instead of trailing the event
+    structure into the report, the desktop notification and the dashboard."""
+    s = " ".join((text or "").split())
+    cut = re.search(r'"\s*[}\]]', s)        # prose does not close a JSON value
+    if cut:
+        s = s[:cut.start()]
+    s = s.strip(" \t\"'-—:;,")
+    if s.startswith("{") or s.startswith("["):
+        return "session output unreadable"
+    return (s[:limit].rstrip() + "…") if len(s) > limit else s
 
 
 def changed_files(cwd: str) -> dict:
@@ -459,14 +525,14 @@ def cmd_fix(cfg: dict, inc_id: str) -> int:
     if not text:
         text = (p.stderr.strip()[:2000] if p else "session timed out")
 
-    m = re.search(r"WATCHER-VERDICT:\s*(fixed|no-change|needs-human)\s*[—-]\s*(.+)",
+    m = re.search(r"WATCHER-VERDICT:\s*(fixed|no-change|needs-human)\s*[—-]\s*([^\r\n]+)",
                   text, re.I)
     verdict = m.group(1).lower() if m else "unknown"
     if m:
-        summary = m.group(2).strip()
+        summary = clean_summary(m.group(2))
     else:
         lines = [l for l in text.strip().splitlines() if l.strip()]
-        summary = lines[-1][:120] if lines else "no output"
+        summary = clean_summary(lines[-1]) if lines else "no output"
 
     # Prove it rather than take the session's word for it.
     verified = None
