@@ -33,6 +33,7 @@ Item {
 
   readonly property color cMuted: Color.mOnSurfaceVariant
   property bool showAllSessions: false
+  property bool showAlerts: false
 
   readonly property int sessionCount: svc ? svc.sessions.length : 0
   readonly property var shownSessions: {
@@ -184,11 +185,63 @@ Item {
             pointSize: Style.fontSizeXS
             color: root.cMuted
           }
+          // The count is the control for the list. A number with nothing behind
+          // it is worse than no number.
           NText {
             Layout.fillWidth: true
-            text: svc ? (svc.alerts.length + " alert" + (svc.alerts.length === 1 ? "" : "s")) : ""
+            text: {
+              if (!svc)
+                return "";
+              var n = svc.alerts.length;
+              if (n === 0)
+                return "no alerts";
+              return (root.showAlerts ? "▾ " : "▸ ") + n + " alert" + (n === 1 ? "" : "s");
+            }
             pointSize: Style.fontSizeXS
             color: svc && svc.alerts.length ? Color.mError : root.cMuted
+
+            MouseArea {
+              anchors.fill: parent
+              enabled: svc && svc.alerts.length > 0
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.showAlerts = !root.showAlerts
+            }
+          }
+        }
+      }
+    }
+
+    NBox {
+      Layout.fillWidth: true
+      visible: root.showAlerts && svc && svc.alerts.length > 0
+      forceOpaque: true
+      implicitHeight: alertCol.implicitHeight + Style.marginM * 2
+
+      ColumnLayout {
+        id: alertCol
+        anchors.fill: parent
+        anchors.margins: Style.marginM
+        spacing: Style.marginXS
+
+        Repeater {
+          model: svc ? svc.alerts : []
+          delegate: RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.marginS
+            Rectangle {
+              Layout.alignment: Qt.AlignVCenter
+              implicitWidth: 6
+              implicitHeight: 6
+              radius: 3
+              color: Color.mError
+            }
+            NText {
+              Layout.fillWidth: true
+              text: modelData
+              pointSize: Style.fontSizeXS
+              color: Color.mOnSurface
+              wrapMode: Text.WordWrap
+            }
           }
         }
       }

@@ -724,6 +724,22 @@ def jobs() -> list[dict]:
 
 
 # ── assembly ─────────────────────────────────────────────────────────────────
+PROJECT_STATUS = HOME / ".claude" / "project-status.json"
+
+
+def deprecated_names() -> set:
+    """Things you have already given up on, from project-sweep.
+
+    A true alert about an abandoned project is still noise, and noise is what
+    trains you to skim the list — which is how a two-month-dead ntfy went
+    unnoticed while it swallowed every crash alert. These are still reported,
+    just not as alerts."""
+    try:
+        return set(json.loads(PROJECT_STATUS.read_text()).get("deprecated") or [])
+    except (OSError, ValueError):
+        return set()
+
+
 def containers() -> list[dict]:
     """Docker containers on this machine, with the two failure modes that hide.
 
@@ -815,13 +831,17 @@ def snapshot() -> dict:
         idle = (a.get("transcript") or {}).get("idle_sec")
         if idle is not None and idle > 300:
             alerts.append(f"agent pid {a['pid']} silent for {int(idle // 60)}min")
+    dead = deprecated_names()
     ctr = containers()
     for c in ctr:
-        if not c["ok"]:
+        c["deprecated"] = c["name"] in dead
+        if not c["ok"] and not c["deprecated"]:
             alerts.append(f"container {c['name']}: {c['problem']}")
     fu = failed_units()
     for u in fu:
-        alerts.append(f"unit {u['unit']} failed ({u['scope']})")
+        u["deprecated"] = u["unit"] in dead or u["unit"].split(".")[0] in dead
+        if not u["deprecated"]:
+            alerts.append(f"unit {u['unit']} failed ({u['scope']})")
 
     live_ids = {a.get("session_id") for a in agents_running if a.get("session_id")}
     return {
@@ -835,6 +855,7 @@ def snapshot() -> dict:
         "jobs": jb,
         "containers": ctr,
         "failed_units": fu,
+        "deprecated": sorted(dead),
         "interactive": {"count": len(interactive), "procs": interactive,
                         "desktop": desktop},
         "alerts": alerts,
