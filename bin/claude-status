@@ -34,6 +34,7 @@
 # One source of truth on purpose: the noctalia plugin and the dashboard tab both
 # read this rather than each re-deriving what counts.
 
+import fnmatch
 import html
 import json
 import os
@@ -226,6 +227,29 @@ def processes() -> list[dict]:
 
 
 # ── watcher ───────────────────────────────────────────────────────────────────
+def watcher_config() -> dict:
+    try:
+        return json.loads((HOME / ".config/watcher/config.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def watcher_blocked(rule: str, subject: str) -> str:
+    """Why `watcher triage` would decline this, or "" if it would run.
+
+    It drops anything whose rule it does not triage and anything matching
+    ignore_subjects — silently, and rightly so. A caller that offers a triage
+    button has to know that, or the button claims work that never happens."""
+    cfg = watcher_config()
+    if not cfg.get("enabled", True):
+        return "watcher is switched off"
+    if rule not in cfg.get("triage_rules", ["unitfail", "osd", "diskfull", "storm"]):
+        return f"watcher does not triage {rule}"
+    if any(fnmatch.fnmatch(subject, p) for p in cfg.get("ignore_subjects", [])):
+        return "on watcher's ignore list"
+    return ""
+
+
 def watcher_state() -> dict:
     out = {"hook_wired": False, "budget": None, "recent": [], "incidents_open": 0}
     jn = next((c for c in (HOME / ".config/hypr/scripts/journal-notify.sh",
@@ -871,8 +895,15 @@ def snapshot() -> dict:
     host = socket.gethostname()
 
     def alert(headline, detail="", rule="unitfail", subject="", fixable=True):
+        subj = subject or headline
+        # `fixable` says an agent could; watcher_blocked says whether it would
+        # actually be handed one. Both have to hold, and the reason it does not
+        # travels with the alert so a reader is not left guessing.
+        why = "" if fixable else "needs root"
+        why = why or watcher_blocked(rule, subj)
         return {"host": host, "headline": headline, "detail": detail,
-                "rule": rule, "subject": subject or headline, "triageable": fixable}
+                "rule": rule, "subject": subj,
+                "triageable": not why, "triage_block": why}
 
     alerts = []
     for t in trg:
@@ -1027,15 +1058,71 @@ def human(snap: dict) -> int:
     return 0
 
 
+DASH_SSH = "ubuntu@100.122.63.6"
+DASH_CACHE = "Documents/Projects/dashboard/.cache_sources"
+
+
+def drain_triage(host: str) -> int:
+    """Run any alerts the dashboard has asked this machine to triage.
+
+    The dashboard cannot reach in here — this machine is the one that reaches
+    out — so a request left there is collected on the next push and started
+    here, the same `watcher triage` call the bar plugin's button makes."""
+    name = f"triage-queue-{host}.json"
+    local_dir = HOME / DASH_CACHE
+    if local_dir.is_dir():                       # the dashboard machine itself
+        f = local_dir / name
+        try:
+            raw = f.read_text()
+        except OSError:
+            return 0
+        f.unlink(missing_ok=True)
+    else:
+        try:
+            p = subprocess.run(
+                ["ssh", "-o", "ConnectTimeout=15", DASH_SSH,
+                 f"cat {DASH_CACHE}/{name} 2>/dev/null && rm -f {DASH_CACHE}/{name}"],
+                capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return 0
+        raw = p.stdout
+    if not raw.strip():
+        return 0
+    try:
+        reqs = json.loads(raw)
+    except ValueError:
+        sys.stderr.write("claude-status: unreadable triage queue, dropped\n")
+        return 0
+
+    watcher = HOME / ".local/bin/watcher"
+    if not watcher.exists():
+        sys.stderr.write("claude-status: triage requested but watcher is not installed\n")
+        return 0
+    started = 0
+    for r in reqs if isinstance(reqs, list) else []:
+        subject = str((r or {}).get("subject") or "").strip()
+        if not subject:
+            continue
+        subprocess.Popen(
+            [str(watcher), "triage", str(r.get("rule") or "unitfail"), subject,
+             str(r.get("body") or subject)],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        started += 1
+    if started:
+        print(f"triage: started {started} run(s) requested from the dashboard")
+    return started
+
+
 def push(snap: dict) -> int:
     """Outbound-only, same shape and transport as push-usage.sh — the server
     never reaches into the laptop."""
-    host = "ubuntu@100.122.63.6"
-    dest = f"Documents/Projects/dashboard/.cache_sources/claude-status-{snap['host']}.json"
+    host = DASH_SSH
+    dest = f"{DASH_CACHE}/claude-status-{snap['host']}.json"
     payload = json.dumps(snap)
 
     # On the dashboard machine itself there is nothing to ssh to.
-    local_dir = HOME / "Documents/Projects/dashboard/.cache_sources"
+    local_dir = HOME / DASH_CACHE
     if local_dir.is_dir():
         f = local_dir / f"claude-status-{snap['host']}.json"
         tmp = f.with_suffix(".tmp")
@@ -1408,7 +1495,16 @@ def main() -> int:
         print()
         return 0
     if "--push" in args:
-        return push(snap)
+        rc = push(snap)
+        # Same trip out: report state, then collect anything the dashboard has
+        # asked this machine to look at. A failed push means the queue is
+        # unreachable too, so there is nothing to collect.
+        if rc == 0:
+            try:
+                drain_triage(snap["host"])
+            except Exception as e:  # noqa: BLE001 — never let pickup break the push
+                sys.stderr.write(f"claude-status: triage pickup failed — {e}\n")
+        return rc
     return human(snap)
 
 
