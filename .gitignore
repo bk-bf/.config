@@ -269,3 +269,23 @@ opencode/bun.lock
 # Pamac window geometry (width/height) — rewritten on every resize, per-machine
 /pamac/config
 osync/*.bak-*
+# Units owned by the tool that runs them, not by this repo. Each is written by
+# that project's own installer with the checkout path filled in, so a clone in
+# any directory works — mirroring them here only ever produced units that
+# pointed at wherever the laptop happened to keep the project.
+#   osd        osd --install-units [--enable]
+#   dashboard  ./install.sh --with-units [--enable-units NAME,…]
+#   codegraph  ./install.sh --with-units [--enable-units]
+/systemd/user/osd-*.service
+/systemd/user/osd-*.timer
+/systemd/user/osd-*.service.d/
+/systemd/user/memory.service
+/systemd/user/collector.service
+/systemd/user/collector.service.d/
+/systemd/user/push-usage.service
+/systemd/user/push-usage.timer
+/systemd/user/push-usage.service.d/
+/systemd/user/claude-memory-sync.service
+/systemd/user/claude-memory-sync.timer
+/systemd/user/codegraph.service
+/systemd/user/codegraph.service.d/
