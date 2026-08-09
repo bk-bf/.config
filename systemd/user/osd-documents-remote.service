@@ -1,9 +1,0 @@
-[Unit]
-Description=osd scheduled sync — documents_remote
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin
-ExecStart=/home/kirill/Documents/local/Projects/osd/osd --guarded-sync documents_remote
