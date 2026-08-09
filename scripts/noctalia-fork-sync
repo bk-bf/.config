@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""noctalia-fork-sync — keep forked Noctalia shell files current with upstream.
+
+The mem-top plugin's bar widget and widget-settings page are verbatim forks of
+two files in the shell that actually runs: ~/Documents/local/Projects/noctalia
+(bk-bf/noctalia), symlinked over ~/.config/quickshell/noctalia-shell. NOT the
+/etc/xdg tree, which is the v4 package frozen at its 2026-06-09 build.
+
+Those files move when he pulls `upstream/legacy-v4` into the fork. Note that
+legacy-v4 is EOL — upstream/main is the unrelated v5 native rewrite — so the
+expected change volume here is low and trending to zero. This exists so that a
+pull cannot silently rot the forks, not because churn is expected.
+
+This does a real 3-way merge whenever they move:
+
+    base  = the upstream file as it was when the fork was taken (.upstream/)
+    ours  = the fork, with our changes
+    theirs= the upstream file as it is now
+
+Clean merge  -> the fork is updated and the baseline advanced. Nothing to do.
+Conflict     -> the fork is LEFT ALONE (the bar keeps working), the conflicted
+                merge is written alongside it, and a ready-to-run prompt is
+                produced so an agent can resolve it while preserving our changes.
+
+Usage:
+  noctalia-fork-sync check     exit 0 if in sync, 1 if upstream moved
+  noctalia-fork-sync sync      merge (this is what the path unit runs)
+  noctalia-fork-sync adopt     record current upstream as the baseline
+  noctalia-fork-sync status    show per-file drift
+"""
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+PLUGIN = os.path.expanduser("~/.config/noctalia/plugins/mem-top")
+BASELINE = os.path.join(PLUGIN, ".upstream")
+STATE = os.path.expanduser("~/.local/state/noctalia-fork-sync")
+SHELL = os.path.expanduser("~/Documents/local/Projects/noctalia")  # the fork IS the running shell (symlinked from ~/.config/quickshell)
+
+# fork file -> upstream file it was taken from
+FORKS = {
+    "BarWidget.qml": SHELL + "/Modules/Bar/Widgets/SystemMonitor.qml",
+    "WidgetSettings.qml": SHELL + "/Modules/Panels/Settings/Bar/WidgetSettings/SystemMonitorSettings.qml",
+}
+
+
+def sha(path):
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return ""
+
+
+def notify(summary, body, urgency="normal"):
+    subprocess.run(["notify-send", "-u", urgency, "-a", "noctalia-fork-sync",
+                    summary, body], check=False)
+
+
+def drift():
+    """[(name, fork, upstream, baseline)] for files whose upstream has moved."""
+    out = []
+    for name, up in FORKS.items():
+        base = os.path.join(BASELINE, name)
+        if not os.path.exists(up):
+            continue
+        if sha(up) != sha(base):
+            out.append((name, os.path.join(PLUGIN, name), up, base))
+    return out
+
+
+def cmd_status(_):
+    for name, up in FORKS.items():
+        base = os.path.join(BASELINE, name)
+        state = "no baseline" if not os.path.exists(base) else (
+            "in sync" if sha(up) == sha(base) else "UPSTREAM MOVED")
+        print("%-22s %s" % (name, state))
+    return 0
+
+
+def cmd_adopt(_):
+    os.makedirs(BASELINE, exist_ok=True)
+    for name, up in FORKS.items():
+        shutil.copy2(up, os.path.join(BASELINE, name))
+        print("baseline recorded: %s" % name)
+    return 0
+
+
+def cmd_check(_):
+    d = drift()
+    for name, *_rest in d:
+        print("upstream moved: %s" % name)
+    return 1 if d else 0
+
+
+def write_prompt(conflicts):
+    """A complete, self-contained brief for whoever resolves this."""
+    os.makedirs(STATE, exist_ok=True)
+    path = os.path.join(STATE, "conflict-prompt.txt")
+    files = "\n".join(
+        "  - fork:      %s\n    conflicted: %s\n    upstream:  %s" % (f, f + ".merged", u)
+        for _n, f, u, _b in conflicts)
+    text = f"""The Noctalia shell package updated and my forked plugin files no longer merge
+cleanly with upstream. Resolve the conflicts, keeping MY changes intact.
+
+Files:
+{files}
+
+Context you need:
+  - The forks live in ~/.config/noctalia/plugins/mem-top/ and are verbatim copies
+    of two upstream shell files, with a small number of deliberate edits. Every
+    one of my edits is marked with a `FORK:` comment. There should be no other
+    differences from upstream.
+  - BarWidget.qml forks Modules/Bar/Widgets/SystemMonitor.qml. My changes:
+      1. plugin wiring (pluginApi / svc properties)
+      2. left click opens this plugin's panel via pluginApi.togglePanel instead
+         of the built-in systemStatsPanel
+      3. the hover tooltip no longer consults that panel's open state
+  - WidgetSettings.qml forks
+    Modules/Panels/Settings/Bar/WidgetSettings/SystemMonitorSettings.qml.
+    My changes: three extra settings (binPath, intervalMs, limit) as
+    value* properties, persisted in saveSettings(), with controls appended at
+    the end of the ColumnLayout.
+
+What to do:
+  1. For each file, take the `.merged` file (it has conflict markers), resolve
+     every marker by keeping the upstream side for shell code and MY side for
+     anything marked FORK:, and write the result over the fork file.
+  2. Delete the `.merged` files.
+  3. Validate: qmllint -I /etc/xdg/quickshell/noctalia-shell <file>
+  4. Record the new baselines: noctalia-fork-sync adopt
+  5. Do NOT reload the shell — this is a live desktop. Tell me to run
+     `noctalia-reload` when you are done.
+
+If a conflict is because upstream deleted or restructured what I patched, say so
+plainly rather than inventing a merge — I would rather re-fork than carry a
+broken patch.
+"""
+    with open(path, "w") as fh:
+        fh.write(text)
+    return path, text
+
+
+def enqueue(prompt_text, prompt_path):
+    """File the work as a nightshift ACTION PROPOSAL.
+
+    Deliberately stops at "proposed", not "queued": an accepted action runs
+    unattended with --dangerously-skip-permissions, and this one rewrites shell
+    files on a live desktop. Approving it is one click in the dashboard, and
+    that click is the human gate the executor is designed around.
+
+    Costs nothing when idle — no daemon, no polling; the existing nightshift
+    pass picks it up only once approved. Silently degrades to "prompt on disk"
+    when the tailnet is unreachable, which this laptop often is.
+    """
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "https://dashboard.callmedaddy.dedyn.io/api/agents/author",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps({
+                "category": "action",
+                "title": "Resolve Noctalia fork merge conflict",
+                "text": prompt_text,
+                "cwd": PLUGIN,
+                "importance": 4,
+            }).encode(),
+            method="POST")
+        with urllib.request.urlopen(req, timeout=15) as r:
+            resp = json.load(r)
+        return bool(resp.get("ok"))
+    except Exception as e:
+        print("could not file proposal (%s); prompt left at %s" % (e, prompt_path))
+        return False
+
+
+def cmd_sync(_):
+    d = drift()
+    if not d:
+        print("in sync")
+        return 0
+
+    os.makedirs(BASELINE, exist_ok=True)
+    clean, conflicts = [], []
+
+    for name, fork, up, base in d:
+        if not os.path.exists(base):
+            print("%s: no baseline, adopting current upstream" % name)
+            shutil.copy2(up, base)
+            continue
+        merged = fork + ".merged"
+        shutil.copy2(fork, merged)
+        # git merge-file <ours> <base> <theirs>, in place on <ours>
+        rc = subprocess.run(
+            ["git", "merge-file", "-L", "fork", "-L", "upstream (forked at)", "-L", "upstream (now)",
+             merged, base, up], capture_output=True, text=True).returncode
+        if rc == 0:
+            shutil.move(merged, fork)
+            shutil.copy2(up, base)
+            clean.append(name)
+        else:
+            conflicts.append((name, fork, up, base))
+
+    if clean:
+        notify("Noctalia fork updated",
+               "Merged upstream changes into: " + ", ".join(clean) +
+               "\nRun noctalia-reload when convenient.")
+        print("merged cleanly: " + ", ".join(clean))
+
+    if conflicts:
+        path, text = write_prompt(conflicts)
+        queued = enqueue(text, path)
+        notify("Noctalia fork: merge conflict",
+               "%d file(s) need manual resolution.\n%s\nPrompt: %s"
+               % (len(conflicts),
+                  "Filed as a nightshift proposal — approve it to run."
+                  if queued else "Not filed — run the prompt yourself.",
+                  path),
+               urgency="critical")
+        print("CONFLICT in: " + ", ".join(n for n, *_ in conflicts))
+        print("prompt: " + path)
+        return 1
+
+    return 0
+
+
+def main():
+    cmds = {"check": cmd_check, "sync": cmd_sync, "adopt": cmd_adopt, "status": cmd_status}
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
+    if cmd not in cmds:
+        print(__doc__)
+        return 2
+    return cmds[cmd](sys.argv[2:])
+
+
+if __name__ == "__main__":
+    sys.exit(main())

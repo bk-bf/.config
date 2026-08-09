@@ -1,0 +1,7 @@
+[Unit]
+Description=Sweep git histories to record which projects are deprecated
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.config/bin/project-sweep

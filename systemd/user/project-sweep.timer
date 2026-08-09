@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly project lifecycle sweep
+
+[Timer]
+OnStartupSec=10min
+OnUnitActiveSec=1w
+Persistent=true
+
+[Install]
+WantedBy=timers.target

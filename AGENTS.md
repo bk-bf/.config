@@ -2,9 +2,11 @@
 
 Instructions for AI agents (OpenCode, etc.) working in this repository.
 
-## What this repo is
+## Working style (all projects)
 
-Personal Arch/CachyOS dotfiles for a Hyprland + Noctalia desktop. Configuration only — no build system, no tests. Changes here affect a live system.
+- **No narration leakage into the product.** A deliverable — slides, docs, README, code comments, commit/PR text, UI copy — must only ever be about its subject, never about how or why you built it. Do not write "plain words first, code names pinned alongside", "this deck reads the code not the notes", "as requested, here is…", "I chose to structure it this way", or reading instructions for your own artifact. The construction of a thing and the content of a thing are two different layers; keep the construction layer in chat with me, out of the artifact. **Litmus test before you write anything into a deliverable: would a human doing this job actually put that sentence there?** A human designer never narrates their own technique onto the slide. If the answer is no, cut it.
+
+- **Never work blind — see the output before calling it done.** For anything with observable output, and *especially* any UI/frontend work, set up a feedback loop **first** and check every change against it — not at the end. For web UI: a running dev server plus screenshots you actually view (headless `firefox --screenshot <url>` for static states; a Playwright script for states behind interaction — filled, loading, error), compared against the target look before declaring it finished. Check both light and dark. Before building tooling from scratch, look for an existing skill, CLI, or library that already does the job. Shipping UI I have never looked at — the exact failure that has wasted your time before — is what this rule exists to prevent. Mechanics: the `visual-dev` skill.
 
 ## Rules
 
@@ -13,7 +15,51 @@ Personal Arch/CachyOS dotfiles for a Hyprland + Noctalia desktop. Configuration 
 - **Never create git worktrees** (`git worktree add`, EnterWorktree, or any auto-isolation) unless I explicitly ask for one. This is a dotfiles repo — the working copy *is* the live config, so edit files in place here. (Enforced for background jobs via `worktree.bgIsolation: "none"` in `.claude/settings.json`.)
 - **Never install packages** or run `yay`/`pacman` unless explicitly asked.
 - **Never run `hyprctl reload`** or restart services unless explicitly asked — this is a live desktop.
-- `install.sh` writes symlinks to `/etc` and `/usr/local/bin`. Don't run it unless asked.
+
+## Memory frontmatter
+
+Every memory file carries a scope, and you decide it as you write:
+
+```yaml
+metadata:
+  node_type: memory
+  type: user | feedback | project | reference
+  scope: universal | device
+  device: <hostname>        # only when scope is device
+  tags: [optional, freeform]
+```
+
+**scope answers one question: is this still true on another machine?**
+
+- `universal` — how Kirill wants to be worked with, facts about a codebase,
+  network topology, anything that travels. These are the ones synced to his
+  other devices, so writing one is writing for every machine he uses.
+- `device` — this box's hardware, desktop session, or installed services: the
+  laptop's soldered RAM, a Hyprland quirk, the media server's docker stack.
+  Name the machine in `device:`.
+
+Default to `universal` when genuinely torn. A wrongly-universal note shows up
+somewhere mildly irrelevant; a wrongly-device note is invisible on the machine
+that needed it, which is the more expensive mistake. But do not reach for it out
+of laziness — a note that says "on this machine" is device-scoped, and shipping
+it elsewhere makes it quietly false rather than merely useless.
+
+Browse and edit all of them at `http://localhost:8790/memory`, or on the
+dashboard at `https://dashboard.callmedaddy.dedyn.io/memory`, which shows every
+machine's notes. Universal ones sync between devices; device ones stay put.
+
+## Shell environment
+
+- **Default to `mosh` for remote work** on `ubuntu` (`mosh ubuntu`). It
+  survives laptop lid-close/suspend — roaming UDP keeps the session pinned, so
+  it resumes on wake. **Do not use plain `ssh` for remote sessions unless I
+  deliberately ask**, or unless the task genuinely needs something mosh can't do:
+  scrollback-heavy reading, port/agent forwarding (`-L`/`-J`), or file transfer
+  (`scp`/`rsync`). `ssh` is unaliased/plain. Trade-off to remember: mosh owns the
+  alt screen and has **no scrollback** (the mouse wheel walks shell history
+  instead of scrolling) — that's expected, reach for `ssh` when you need to read
+  back. `mosh` is wrapped in `.aliases` to force `LC_ALL=C.UTF-8` (servers lack
+  the laptop's `de_DE.UTF-8` locales, else mosh-server bails to US-ASCII).
 
 ## Commit style
 
@@ -36,25 +82,7 @@ Use `/commit` to stage and commit without confirmation.
 | `/commit` | `git add -A`, inspect diff, commit with conventional message, then push. No confirmation. |
 | `/udoc <file>` | Update a documentation file to reflect current codebase state. |
 
-## Sensitive paths (never commit)
-
-Defined in `.git/info/exclude`. Key entries:
-
-- `opencode/commands/` — private slash commands (tracked separately)
-- `opencode/node_modules/`, `opencode/bun.lock` — generated
-- `gh/` — GitHub CLI credentials
-- `mozilla/firefox/`, `vesktop/`, `discord/` — browser/client data
-- `documentation/private` — private notes
-- `tmux/plugins/` — vendored plugins
-
 ## AI preferences
 
 - Primary agent: OpenCode (replaced Hermes).
 - Preferred model: Claude Sonnet via GitHub Copilot.
-- Former Hermes settings: 3 GB systemd cgroup memory cap for CLI sessions, aggressive context compression (threshold 0.3).
-
-## Generated files (don't edit manually)
-
-- `gtk-3.0/noctalia-colors.css`, `gtk-4.0/noctalia-colors.css` — written by `theme-sync.sh`
-- `kitty/current-theme.conf` — written by `theme-sync.sh`
-- `noctalia/colors.json` — written by Noctalia on scheme change

@@ -1,0 +1,11 @@
+{
+  "_note": "Your word beats the git heuristic. Names match local repos, docker containers and systemd units \u2014 claude-status checks alert subjects against anything marked deprecated here and stops paging about them.",
+  "yact": "deprecated",
+  "signoz": "deprecated",
+  "signoz-clickhouse": "deprecated",
+  "signoz-otel-collector": "deprecated",
+  "signoz-zookeeper-1": "deprecated",
+  "yact-health-notify.service": "deprecated",
+  "ntfy": "deprecated",
+  "_ntfy_note": "Deprecated by Kirill 2026-08-06, overriding an earlier reading that its exited container was a real fault. Nothing on the server still publishes to it \u2014 grepping for port 2586 finds no live caller \u2014 so there is no orphaned alert path left behind."
+}

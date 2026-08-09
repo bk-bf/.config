@@ -1,0 +1,37 @@
+{
+  "_note": "session_args is passed verbatim to `claude`. Non-empty means the triage agent applies fixes itself; every such run is bracketed by a snapper snapshot and revertible with `undo`, and the report records which files changed. Empty it to go back to diagnose-only.",
+  "_note2": "triage_rules are journal-notify.sh rule ids. oom/pressure/coredump are intentionally excluded \u2014 a Claude session started because RAM ran out competes for the RAM that ran out.",
+  "enabled": true,
+  "model": "sonnet",
+  "session_args": [
+    "--dangerously-skip-permissions"
+  ],
+  "triage_rules": [
+    "unitfail",
+    "osd",
+    "diskfull",
+    "storm"
+  ],
+  "cooldown_min": 360,
+  "max_sessions_per_day": 6,
+  "session_timeout_sec": 900,
+  "verify_restart": true,
+  "ignore_subjects": [
+    "watcher*",
+    "app-*.scope",
+    "app-com.github.wwmm.easyeffects@autostart.service"
+  ],
+  "context": [
+    {
+      "rule": "osd",
+      "cwd": "~/Documents/local/Projects/osd",
+      "hint": "osd refuses to propagate this many deletions. Work out WHY the deletions appeared before deciding whether to let them through \u2014 a legitimate cleanup and a broken replica look identical from the guard's side. The sync config is ~/.config/osync/osd.toml; the guard is delete_guard."
+    },
+    {
+      "rule": "unitfail",
+      "subject": "osd-*",
+      "cwd": "~/Documents/local/Projects/osd",
+      "hint": "This unit runs `osd --guarded-sync`; exit code 3 means the deletion guard blocked the sync rather than osync failing."
+    }
+  ]
+}

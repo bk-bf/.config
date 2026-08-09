@@ -99,5 +99,5 @@ This makes the module a no-op when homed isn't running — if it somehow succeed
 
 ## Related
 
-- [THEME_SYNC.md](../UI/THEME_SYNC.md) — restarts this service on every color scheme change; GTK3 apps have no CSS live-reload so a restart is the only way to apply new colors to the auth dialog
-- [UWSM_SESSION.md](../UI/UWSM_SESSION.md) — explains why `PartOf=graphical-session.target` requires UWSM; without it this service never auto-starts
+- [THEME_SYNC.md](../ui/THEME_SYNC.md) — restarts this service on every color scheme change; GTK3 apps have no CSS live-reload so a restart is the only way to apply new colors to the auth dialog
+- [UWSM_SESSION.md](../ui/UWSM_SESSION.md) — explains why `PartOf=graphical-session.target` requires UWSM; without it this service never auto-starts

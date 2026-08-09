@@ -1,0 +1,1512 @@
+#!/usr/bin/env python3
+# claude-status — the background Claude agents on this machine, and the things
+# wired up to start them.
+#
+#   claude-status            human-readable
+#   claude-status --json     the same data as JSON (noctalia plugin + dashboard)
+#   claude-status --push     ship a snapshot to the dashboard aggregator
+#   claude-status --follow <session-id>
+#                            tail a running agent's transcript, rendered readable
+#   claude-status open --follow <id>        open that follow in a terminal window
+#   claude-status onboard <ssh-host>   install on another machine
+#   claude-status rm --session <id> | --run <id> | --job <unit>
+#   claude-status open --resume <id> [--cwd DIR]
+#                            reopen a finished session interactively
+#
+# Scope is deliberate: report what has no surface of its own. An interactive
+# session in a terminal is something you are already looking at, so it is counted
+# and left alone. What nobody is watching is the unattended stuff — an agent
+# watcher started because a unit failed overnight, the triggers that can start
+# one, a docker container quietly crash-looping, a failed unit.
+#
+# Failed units are collected wholesale rather than from WATCHED_UNITS, and
+# containers are read from docker directly, because the failure that costs you a
+# day is always the one nobody thought to add to a list. Containers only alert
+# when they are meant to be up (restart policy always/unless-stopped) — half a
+# media box is deliberately stopped, and alerting on those teaches you to ignore
+# the list, which is how the real one gets missed.
+#
+# "Running" is not the useful signal for an agent: a wedged headless run has the
+# same process, RSS and uptime as a working one. Claude Code appends to
+# ~/.claude/projects/<slug>/<session>.jsonl as it goes, so the mtime of that
+# file is when the agent last actually produced something. That is `idle_sec`.
+#
+# One source of truth on purpose: the noctalia plugin and the dashboard tab both
+# read this rather than each re-deriving what counts.
+
+import fnmatch
+import html
+import json
+import os
+import re
+import pwd
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+PROJECTS = HOME / ".claude" / "projects"
+WATCHER_STATE = HOME / ".local/state/watcher"
+UID = os.getuid()
+
+# Units whose health means something for background Claude work. Anything that
+# is not installed is reported as absent rather than silently skipped — a
+# monitor that quietly stopped existing is the failure mode worth seeing.
+WATCHED_UNITS = [
+    ("journal-notify.service", "journal watcher"),
+    ("claude-memory-sync.timer", "memory mirror"),
+]
+
+
+def run(cmd, timeout=15) -> tuple[int, str]:
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, (p.stdout or "") + (p.stderr or "")
+    except (subprocess.TimeoutExpired, OSError):
+        return 1, ""
+
+
+# ── processes ────────────────────────────────────────────────────────────────
+def proc_field(pid: int, name: str) -> str:
+    try:
+        return (Path("/proc") / str(pid) / name).read_text()
+    except OSError:
+        return ""
+
+
+def proc_cwd(pid: int) -> str:
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return ""
+
+
+def proc_unit(pid: int) -> str:
+    """Last path component of the cgroup — for a transient session that is
+    watcher-session-<fp>.service, which ties the process back to its incident."""
+    cg = proc_field(pid, "cgroup").strip()
+    if not cg:
+        return ""
+    leaf = cg.splitlines()[-1].rsplit("/", 1)[-1]
+    return leaf if leaf.endswith((".service", ".scope")) else ""
+
+
+def proc_start(pid: int) -> float:
+    try:
+        return (Path("/proc") / str(pid)).stat().st_ctime
+    except OSError:
+        return 0.0
+
+
+def classify(args: str, comm: str, pid: int) -> str | None:
+    """What kind of Claude this is. Returns None for anything that is not one.
+
+    claude-desktop is the GUI app — reported, but separately, because it is
+    already visible on screen and its dozen electron helpers would otherwise
+    drown out the sessions this tool exists to surface."""
+    if comm.startswith("claude-desktop") or "/claude-desktop" in args:
+        return "desktop"
+    if "chrome_crashpad" in args and "Claude" in args:
+        return None
+    if "anthropic.claude-code" in args or "native-binary/claude" in args:
+        return "ide"
+    if comm != "claude" and "/claude" not in args.split(" ")[0]:
+        return None
+    toks = args.split()
+    if "-p" in toks or "--print" in toks:
+        return "headless"
+    if proc_unit(pid).startswith("watcher-session-"):
+        return "headless"
+    if "--resume" in toks or "-c" in toks or "--continue" in toks:
+        return "interactive"
+    return "interactive"
+
+
+def slug_for(cwd: str) -> str:
+    """Claude Code names a project directory after its path with separators
+    flattened to dashes."""
+    return cwd.replace("/", "-")
+
+
+def _describe(f: Path) -> dict:
+    try:
+        stat = f.stat()
+    except OSError:
+        return {}
+    return {"path": str(f), "session_id": f.stem, "mtime": stat.st_mtime,
+            "idle_sec": round(time.time() - stat.st_mtime, 1),
+            "size_kb": round(stat.st_size / 1024, 1)}
+
+
+def transcript_for(cwd: str, started: float, args: str, claimed: set) -> dict:
+    """Which transcript belongs to THIS process.
+
+    `--resume <id>` names it outright. Otherwise fall back to the newest file in
+    the project slug that was touched within the process lifetime — but claim
+    it, because several sessions are routinely open on the same directory and
+    without claiming they would all report the newest one, i.e. all show the
+    same liveness and three idle sessions would look busy."""
+    if not cwd:
+        return {}
+    d = PROJECTS / slug_for(cwd)
+    if not d.is_dir():
+        return {}
+
+    toks = args.split()
+    if "--resume" in toks:
+        i = toks.index("--resume")
+        if i + 1 < len(toks):
+            f = d / f"{toks[i + 1]}.jsonl"
+            if f.exists():
+                claimed.add(str(f))
+                return _describe(f)
+
+    best, best_m = None, 0.0
+    for f in d.glob("*.jsonl"):
+        if str(f) in claimed:
+            continue
+        try:
+            m = f.stat().st_mtime
+        except OSError:
+            continue
+        if m >= started - 5 and m > best_m:
+            best, best_m = f, m
+    if not best:
+        return {}
+    claimed.add(str(best))
+    return _describe(best)
+
+
+def processes() -> list[dict]:
+    rc, out = run(["ps", "-eo", "pid=,comm=,rss=,args="], timeout=20)
+    if rc != 0:
+        return []
+    found, desktop = [], {"kind": "desktop", "procs": 0, "rss_mb": 0.0}
+    now = time.time()
+    claimed: set = set()
+    # Youngest first, so a newly started session claims the transcript it just
+    # created before an older one on the same directory can take it.
+    lines = sorted(out.splitlines(),
+                   key=lambda l: -proc_start(int(l.split()[0]))
+                   if l.split() and l.split()[0].isdigit() else 0)
+    for line in lines:
+        parts = line.strip().split(None, 3)
+        if len(parts) < 4:
+            continue
+        pid_s, comm, rss_s, args = parts
+        if not pid_s.isdigit():
+            continue
+        pid = int(pid_s)
+        kind = classify(args, comm, pid)
+        if kind is None:
+            continue
+        rss_mb = round(int(rss_s) / 1024, 1) if rss_s.isdigit() else 0.0
+        if kind == "desktop":
+            desktop["procs"] += 1
+            desktop["rss_mb"] = round(desktop["rss_mb"] + rss_mb, 1)
+            continue
+        cwd, started = proc_cwd(pid), proc_start(pid)
+        unit = proc_unit(pid)
+        tr = transcript_for(cwd, started, args, claimed)
+        found.append({
+            "pid": pid, "kind": kind, "unit": unit,
+            "cwd": cwd, "project": os.path.basename(cwd) or cwd,
+            "started": started, "runtime_sec": round(now - started, 1) if started else None,
+            "rss_mb": rss_mb, "args": args[:200],
+            "transcript": tr,
+            "session_id": tr.get("session_id", ""),
+        })
+    found.sort(key=lambda p: (p["kind"] != "headless", -(p["runtime_sec"] or 0)))
+    if desktop["procs"]:
+        desktop["project"] = "Claude Desktop"
+        found.append(desktop)
+    return found
+
+
+# ── watcher ───────────────────────────────────────────────────────────────────
+def watcher_config() -> dict:
+    try:
+        return json.loads((HOME / ".config/watcher/config.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def watcher_blocked(rule: str, subject: str) -> str:
+    """Why `watcher triage` would decline this, or "" if it would run.
+
+    It drops anything whose rule it does not triage and anything matching
+    ignore_subjects — silently, and rightly so. A caller that offers a triage
+    button has to know that, or the button claims work that never happens."""
+    cfg = watcher_config()
+    if not cfg.get("enabled", True):
+        return "watcher is switched off"
+    if rule not in cfg.get("triage_rules", ["unitfail", "osd", "diskfull", "storm"]):
+        return f"watcher does not triage {rule}"
+    if any(fnmatch.fnmatch(subject, p) for p in cfg.get("ignore_subjects", [])):
+        return "on watcher's ignore list"
+    return ""
+
+
+def watcher_state() -> dict:
+    out = {"hook_wired": False, "budget": None, "recent": [], "incidents_open": 0}
+    jn = next((c for c in (HOME / ".config/hypr/scripts/journal-notify.sh",
+                           HOME / ".local/bin/journal-notify.sh") if c.exists()),
+              HOME / ".config/hypr/scripts/journal-notify.sh")
+    try:
+        t = jn.read_text(errors="ignore")
+        out["hook_wired"] = 'triage "$rule"' in t and "WATCHER" in t
+    except OSError:
+        pass
+    try:
+        st = json.loads((WATCHER_STATE / "state.json").read_text())
+        today = time.strftime("%Y-%m-%d")
+        out["budget"] = {"used": st.get("sessions", {}).get(today, 0), "cap": 6}
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    reports = WATCHER_STATE / "reports"
+    incidents = WATCHER_STATE / "incidents"
+    done = set()
+    if reports.is_dir():
+        for f in sorted(reports.glob("*.json"))[-8:]:
+            try:
+                r = json.loads(f.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            done.add(f.stem)
+            inc = r.get("incident", {})
+            verdict = "still failing" if r.get("verified") is False else r.get("verdict")
+            out["recent"].append({
+                "id": inc.get("id", f.stem),
+                "subject": inc.get("subject") or inc.get("unit") or "?",
+                "verdict": verdict, "summary": r.get("summary", ""),
+                "cost_usd": r.get("cost_usd"), "ts": inc.get("ts"),
+                "read_only": r.get("read_only"),
+                # What `claude --resume <id>` needs to reopen this run in the
+                # foreground. Older reports predate this being recorded.
+                "session_id": r.get("session_id") or "",
+                "cwd": r.get("cwd") or "",
+            })
+    out["recent"].reverse()
+    if incidents.is_dir():
+        incs = sorted(incidents.glob("*.json"))
+        out["incidents_open"] = sum(1 for f in incs if f.stem not in done)
+        if incs:
+            try:
+                out["last_incident_ts"] = json.loads(incs[-1].read_text()).get("ts")
+            except (OSError, ValueError):
+                pass
+    return out
+
+
+# ── unit inspection ──────────────────────────────────────────────────────────
+def unit_state(unit: str) -> dict:
+    rc, out = run(["systemctl", "--user", "show", unit, "--no-pager",
+                   "-p", "LoadState", "-p", "ActiveState", "-p", "SubState",
+                   "-p", "Result", "-p", "ExecMainStatus"])
+    return dict(l.split("=", 1) for l in out.strip().splitlines() if "=" in l)
+
+
+def MANAGER_CHATTER(line: str) -> bool:
+    """systemd's own narration about a unit, as it appears under `-o cat`."""
+    return line.startswith((
+        "Started", "Starting", "Stopping", "Stopped", "Finished",
+        "Failed to start", "Main process exited", "Consumed",
+        "Deactivated successfully", "Scheduled restart",
+    ))
+
+
+def last_outcome(unit: str) -> tuple[bool | None, str]:
+    """Did this unit's last COMPLETED run succeed, and why not.
+
+    `systemctl show` reports the instantaneous state, and while a oneshot is
+    mid-run that is ActiveState=activating with a stale Result=success. For a
+    unit on a 60s timer that fails every time, sampling catches it running often
+    enough to report it healthy — which is exactly the blind spot this tool is
+    supposed to close. The journal records what actually finished."""
+    rc, out = run(["journalctl", "--user", "-u", unit, "-n", "150",
+                   "--no-pager", "-o", "cat"], timeout=25)
+    if rc != 0 or not out.strip():
+        return None, ""
+    lines = out.splitlines()
+    for i in range(len(lines) - 1, -1, -1):
+        l = lines[i].strip()
+        if "Failed with result" in l or l.startswith("Failed to start"):
+            # The cause is whatever the PROCESS said just before systemd
+            # noticed; systemd's own lines only carry the exit code, and under
+            # `-o cat` they are unprefixed, so they must be excluded by shape.
+            for j in range(i - 1, max(-1, i - 14), -1):
+                prev = lines[j].strip()
+                if prev and not prev.startswith(unit) and not MANAGER_CHATTER(prev):
+                    return False, prev[:200]
+            return False, ""
+        if l.startswith("Finished ") or "Deactivated successfully" in l:
+            return True, ""
+    return None, ""
+
+
+def osd_jobs() -> list[dict]:
+    """Every osd sync timer, and what its service last actually did."""
+    rc, out = run(["systemctl", "--user", "list-unit-files", "--no-pager", "--plain"])
+    jobs_ = []
+    for line in out.splitlines():
+        name = line.split()[0] if line.split() else ""
+        if not (name.startswith("osd-") and name.endswith(".timer")):
+            continue
+        svc = name[:-len(".timer")] + ".service"
+        p_ = unit_state(svc)
+        ok, reason = last_outcome(svc)
+        if ok is None:
+            ok = p_.get("ActiveState") != "failed"
+        jobs_.append({"name": name[len("osd-"):-len(".timer")], "unit": svc,
+                      "ok": bool(ok), "state": p_.get("ActiveState", "?"),
+                      "running": p_.get("ActiveState") == "activating",
+                      "detail": reason})
+    return jobs_
+
+
+
+# ── recent sessions (any kind, running or finished) ──────────────────────────
+def slug_to_path(slug: str) -> str:
+    """Reverse a project slug back to a real directory.
+
+    The slug replaces every character that is not a letter or digit with "-",
+    so it is lossy in two ways at once: a project whose name contains a dash
+    (ernährungs-app) looks like nested directories, and so does one containing
+    a non-ASCII letter (the "ä" is flattened too). String substitution cannot
+    recover either. Match against what is actually on disk instead: at each
+    level, re-flatten the real directory names the same way and take the
+    longest run of slug segments that a real entry accounts for."""
+    parts = slug.lstrip("-").split("-")
+    path, i = "/", 0
+    while i < len(parts):
+        try:
+            entries = [e for e in os.listdir(path)
+                       if os.path.isdir(os.path.join(path, e))]
+        except OSError:
+            entries = []
+        matched = False
+        for take in range(len(parts) - i, 0, -1):
+            want = "-".join(parts[i:i + take])
+            for e in entries:
+                if re.sub(r"[^A-Za-z0-9]", "-", e) == want:
+                    path, i, matched = os.path.join(path, e), i + take, True
+                    break
+            if matched:
+                break
+        if not matched:                 # project since deleted or renamed
+            path, i = os.path.join(path, parts[i]), i + 1
+    return path
+
+
+# ── notifications ────────────────────────────────────────────────────────────
+NOCTALIA_HISTORY = Path(os.path.expanduser("~/.cache/noctalia/notifications.json"))
+NOTIFY_APPS = ("system", "watcher", "warden", "osd")
+
+
+def recent_notifications(limit: int = 12) -> list[dict]:
+    """The toasts this machine actually raised, so the dashboard can show the
+    same thing you saw on screen — and so a headless machine, which has no
+    desktop to toast at, still has somewhere to report.
+
+    Read from noctalia's own history rather than kept separately: what is
+    mirrored is then by definition what was shown."""
+    out = []
+    # The written feed first — it is the only source on a headless host, and on
+    # the laptop it carries the same events with the rule attached.
+    feed = Path(os.path.expanduser("~/.local/state/claude-status/notifications.jsonl"))
+    try:
+        for line in feed.read_text(errors="replace").splitlines()[-200:]:
+            try:
+                n = json.loads(line)
+            except ValueError:
+                continue
+            out.append({"app": n.get("app", ""), "summary": n.get("summary", ""),
+                        "body": n.get("body", ""), "ts": n.get("ts", 0),
+                        "age_sec": round(time.time() - (n.get("ts") or 0), 1),
+                        "urgency": n.get("urgency", "")})
+    except OSError:
+        pass
+    try:
+        ns = json.loads(NOCTALIA_HISTORY.read_text()).get("notifications", [])
+    except (OSError, ValueError):
+        ns = []
+    for n in ns:
+        app = (n.get("appName") or "").lower()
+        if app not in NOTIFY_APPS:
+            continue
+        ts = n.get("timestamp", 0) or 0
+        ts = ts / 1000 if ts > 1e12 else ts
+        out.append({
+            "app": n.get("appName") or "",
+            "summary": html.unescape((n.get("summary") or "").strip()),
+            "body": html.unescape((n.get("body") or "").strip())[:300],
+            "ts": ts,
+            "age_sec": round(time.time() - ts, 1) if ts else None,
+            "urgency": n.get("urgency", ""),
+        })
+    # The laptop records each toast twice — once when written to the feed, once
+    # by noctalia when it was shown. Same event, so collapse on summary + time.
+    out.sort(key=lambda n: -(n["ts"] or 0))
+    deduped, seen = [], []
+    for n in out:
+        key = n["summary"].strip().lower()
+        if any(k == key and abs(t - (n["ts"] or 0)) < 10 for k, t in seen):
+            continue
+        seen.append((key, n["ts"] or 0))
+        deduped.append(n)
+    return deduped[:limit]
+
+
+
+# ── herdr ────────────────────────────────────────────────────────────────────
+def herdr_panes() -> dict:
+    """Claude sessions that live in a herdr pane, keyed by session id.
+
+    herdr knows things nothing else here does: the title Claude actually
+    generated for the session, whether the agent is idle or working, and the
+    pane it occupies. A pane id means a session can simply be FOCUSED rather
+    than reopened — and it avoids launching herdr inside herdr, which herdr
+    refuses ("nested herdr is disabled by default")."""
+    if not shutil.which("herdr"):
+        return {}
+    rc, out = run(["herdr", "pane", "list"], timeout=10)
+    if rc != 0:
+        return {}
+    try:
+        panes = json.loads(out)["result"]["panes"]
+    except (ValueError, KeyError, TypeError):
+        return {}
+    found = {}
+    for pane in panes:
+        sess = pane.get("agent_session") or {}
+        sid = sess.get("value")
+        if not sid:
+            continue
+        found[sid] = {
+            "pane_id": pane.get("pane_id"),
+            "tab_id": pane.get("tab_id"),
+            "title": pane.get("terminal_title_stripped") or "",
+            "status": pane.get("agent_status") or "",
+            "cwd": pane.get("cwd") or "",
+        }
+    return found
+
+
+
+def session_title(f: Path) -> str:
+    """A human label for a session.
+
+    Claude Code does not write a title into the transcript, so derive one from
+    the first thing asked. Without this every row is a hex id and you cannot
+    tell which session is which — which is the whole point of listing them."""
+    try:
+        with open(f, errors="replace") as fh:
+            for _ in range(400):
+                line = fh.readline()
+                if not line:
+                    break
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if r.get("type") == "summary" and r.get("summary"):
+                    return str(r["summary"])[:80]
+                if r.get("type") != "user":
+                    continue
+                c = (r.get("message") or {}).get("content")
+                text = ""
+                if isinstance(c, str):
+                    text = c
+                elif isinstance(c, list):
+                    for x in c:
+                        if isinstance(x, dict) and x.get("type") == "text":
+                            text = x["text"]
+                            break
+                text = " ".join(text.split())
+                # Skip the harness preamble so the label is the actual ask.
+                if not text or text.startswith(("<", "Caveat:", "[Request")):
+                    continue
+                return text[:80]
+    except OSError:
+        pass
+    return ""
+
+
+def recent_sessions(limit: int = 10, live_ids: set | None = None) -> list[dict]:
+    """The newest transcripts across every project.
+
+    Background agents are rare by design — most of the time nothing is running,
+    and a panel that can only act on a live agent gives you nothing to click.
+    Every one of these can be reopened with `claude --resume`, which is what
+    "open a past session" means."""
+    live_ids = live_ids or set()
+    panes = herdr_panes()
+    out = []
+    if not PROJECTS.is_dir():
+        return out
+    for d in PROJECTS.iterdir():
+        if not d.is_dir():
+            continue
+        cwd = slug_to_path(d.name)
+        project = os.path.basename(cwd) or d.name
+        for f in d.glob("*.jsonl"):
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            out.append({
+                "session_id": f.stem,
+                "project": project,
+                "cwd": cwd,
+                "exists": os.path.isdir(cwd),
+                "mtime": st.st_mtime,
+                "age_sec": round(time.time() - st.st_mtime, 1),
+                "size_kb": round(st.st_size / 1024, 1),
+                "live": f.stem in live_ids,
+                "title": (panes.get(f.stem, {}).get("title") or session_title(f)),
+                "pane_id": panes.get(f.stem, {}).get("pane_id", ""),
+                "agent_status": panes.get(f.stem, {}).get("status", ""),
+            })
+    out.sort(key=lambda r: -r["mtime"])
+    return out[:limit]
+
+
+def backfill_reports() -> int:
+    """Older watcher reports stored the raw event stream instead of the parsed
+    result, so their session id is present in the text but not as a field. Pull
+    it out once so those runs become resumable too."""
+    d = WATCHER_STATE / "reports"
+    if not d.is_dir():
+        return 0
+    n = 0
+    for f in sorted(d.glob("*.json")):
+        try:
+            r = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if r.get("session_id"):
+            continue
+        m = re.search(r'"session_id"\s*:\s*"([0-9a-f-]{36})"', r.get("transcript") or "")
+        if not m:
+            continue
+        r["session_id"] = m.group(1)
+        r.setdefault("cwd", (r.get("incident") or {}).get("cwd") or "")
+        f.write_text(json.dumps(r, indent=2) + "\n")
+        n += 1
+    return n
+
+
+# ── triggers: what can START a background agent ──────────────────────────────
+# Only one thing on this machine actually launches an agent — journal-notify
+# hands an incident to watcher, which runs `claude -p`. It is listed explicitly
+# rather than discovered, because "does this unit eventually run a Claude
+# agent" is not something you can tell by reading an ExecStart: every other
+# claude-* timer here manages Claude's artifacts (reaping processes, syncing
+# memory, garbage-collecting sessions) without ever starting one. Calling those
+# triggers would be a lie that hides the single one that matters.
+def triggers() -> list[dict]:
+    jn = unit_state("journal-notify.service")
+    jn_ok = jn.get("ActiveState") in ("active", "activating")
+    w = watcher_state()
+    cfg = watcher_config()
+
+    armed = jn_ok and w["hook_wired"] and cfg.get("enabled", True)
+    budget = w.get("budget") or {}
+    used, cap = budget.get("used", 0), budget.get("cap", cfg.get("max_sessions_per_day", 6))
+    if armed and cap and used >= cap:
+        armed = False
+
+    why = []
+    if not jn_ok:
+        why.append("journal-notify not running")
+    if not w["hook_wired"]:
+        why.append("hook missing from journal-notify.sh")
+    if not cfg.get("enabled", True):
+        why.append("disabled in watcher config")
+    if cap and used >= cap:
+        why.append(f"daily cap reached ({used}/{cap})")
+
+    return [{
+        "name": "watcher",
+        "via": "journal-notify.sh → watcher triage",
+        "armed": armed,
+        "why": "; ".join(why),
+        "watches": cfg.get("triage_rules", []),
+        "authority": "can change files" if cfg.get("session_args") else "read-only",
+        "budget": {"used": used, "cap": cap},
+        "cooldown_min": cfg.get("cooldown_min", 360),
+        "last_fired": w.get("last_incident_ts"),
+        "model": cfg.get("model", "sonnet"),
+    }]
+
+
+def watcher_config() -> dict:
+    try:
+        return json.loads((HOME / ".config/watcher/config.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+# ── jobs: Claude housekeeping that does NOT start an agent ───────────────────
+# Kept separate from triggers on purpose. These are the scripts that keep Claude
+# tidy and its data in sync; when one breaks it is usually what generates the
+# incident a trigger then reacts to, so it belongs on the same screen — just not
+# in the same list.
+JOB_UNITS = [
+    ("journal-notify.service", "journal watcher", "watches every unit; feeds watcher"),
+    ("claude-memory-sync.timer", "memory mirror", "syncs ~/.claude memory between hosts"),
+    ("claude-reaper.timer", "session reaper", "kills orphaned Claude processes"),
+    ("claude-vscode-session-gc.timer", "vscode session gc", "prunes editor session files"),
+    ("claude-status-push.timer", "status push", "ships this snapshot to the dashboard"),
+]
+
+
+
+# ── turning a failure into a sentence and an action ──────────────────────────
+# Raw journal text is not a user interface. "claude-sessions-laptop: 73
+# deletions exceed the guard of 25 — sync skipped. Raise delete_guard or sync
+# manually to override." tells you the mechanism and leaves you to work out both
+# what it means and what to do. Say what happened in one sentence, and offer the
+# button that fixes it.
+def explain(job_name: str, detail: str) -> dict:
+    if not detail:
+        return {}
+    m = re.search(r"(\S+): (\d+) deletions exceed the guard of (\d+)", detail)
+    if m:
+        conn, dels, guard = m.group(1), m.group(2), m.group(3)
+        return {
+            "problem": f"{dels} files would be deleted on the server — over the "
+                       f"safety limit of {guard}, so the whole sync is paused.",
+            "action": {"label": "Sync now",
+                       "cmd": f"osd -c {conn} --sync",
+                       "cwd": str(HOME / "Documents/local/Projects/osd")},
+        }
+    if "osync exited with code" in detail:
+        return {"problem": "The sync tool exited with an error.", "action": {}}
+    # Unknown failure: still strip the duplicated unit prefix so the sentence
+    # does not say the same name twice.
+    txt = detail.split(": ", 1)[-1] if detail.startswith(job_name.split(" · ")[-1]) else detail
+    return {"problem": txt[:160], "action": {}}
+
+
+def unit_script(unit: str) -> str:
+    """The file a unit actually runs, so a card can open it in an editor."""
+    rc, out = run(["systemctl", "--user", "show", unit, "-p", "ExecStart", "--value"])
+    m = re.search(r"path=([^ ;]+)", out or "")
+    return m.group(1) if m else ""
+
+
+def jobs() -> list[dict]:
+    out = []
+    for unit, label, what in JOB_UNITS:
+        p = unit_state(unit)
+        load = p.get("LoadState", "not-found")
+        if load == "not-found":
+            # Only the trigger chain is required everywhere. The rest is
+            # per-machine housekeeping, and listing a laptop-only job as
+            # "missing" on a server is noise, not a finding.
+            if unit == "journal-notify.service":
+                out.append({"name": label, "unit": unit, "what": what, "ok": False,
+                            "state": "not installed", "detail": "",
+                            "problem": "Not installed on this machine, so nothing "
+                                       "here can start an agent.", "action": {}})
+            continue
+        # For a timer, health is two separate facts: is the timer itself armed,
+        # and did its last run succeed. Reading ActiveState off the SERVICE is
+        # wrong — between runs a healthy oneshot is "inactive", which reads as
+        # broken; and reading it off the TIMER alone hides a service that fails
+        # every single time it fires.
+        is_timer = unit.endswith(".timer")
+        svc = unit[:-len(".timer")] + ".service" if is_timer else unit
+        ran_ok, reason = last_outcome(svc)
+        active = p.get("ActiveState", "?")
+        armed = active in ("active", "activating")
+        ok = armed and (ran_ok is not False)
+        if is_timer and not armed:
+            state, reason = "timer not enabled", reason or "never scheduled"
+        elif ran_ok is False:
+            state = "last run failed"
+        else:
+            state = "waiting" if is_timer else active
+        out.append({"name": label, "unit": unit, "what": what, "ok": bool(ok),
+                    "state": state, "detail": reason, "script": unit_script(svc),
+                    **explain(label, "" if ok else reason)})
+
+    for j in osd_jobs():
+        out.append({"name": f"sync · {j['name']}", "unit": j["unit"],
+                    "script": unit_script(j["unit"]),
+                    "what": "osync replica", "ok": j["ok"],
+                    "state": ("running" if j.get("running")
+                              else ("last run failed" if not j["ok"] else "in sync")),
+                    "detail": j["detail"],
+                    **explain(j["name"], "" if j["ok"] else j["detail"])})
+    return out
+
+
+# ── assembly ─────────────────────────────────────────────────────────────────
+PROJECT_STATUS = HOME / ".claude" / "project-status.json"
+
+
+def deprecated_names() -> set:
+    """Things you have already given up on, from project-sweep.
+
+    A true alert about an abandoned project is still noise, and noise is what
+    trains you to skim the list — which is how a two-month-dead ntfy went
+    unnoticed while it swallowed every crash alert. These are still reported,
+    just not as alerts."""
+    try:
+        return set(json.loads(PROJECT_STATUS.read_text()).get("deprecated") or [])
+    except (OSError, ValueError):
+        return set()
+
+
+def containers() -> list[dict]:
+    """Docker containers on this machine, with the two failure modes that hide.
+
+    A crash-looping container is the nastiest kind of down: `docker compose up`
+    reports success, the container object exists, and something may even answer
+    on the port — the old process that never released it. Restart count and the
+    `restarting` state are what actually distinguish it from healthy.
+    """
+    fmt = ("{{.Name}}\t{{.State.Status}}\t{{.RestartCount}}"
+           "\t{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}"
+           "\t{{.State.ExitCode}}\t{{.HostConfig.RestartPolicy.Name}}")
+    rc, out = run(["docker", "ps", "-a", "--format", "{{.Names}}"], timeout=10)
+    if rc != 0:
+        return []                                  # no docker here — not a fault
+    names = [n for n in out.split() if n]
+    if not names:
+        return []
+    rc, out = run(["docker", "inspect", "-f", fmt, *names], timeout=20)
+    if rc != 0:
+        return []
+    rows = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 6:
+            continue
+        name, status, restarts, health, code, policy = parts[:6]
+        name = name.lstrip("/")
+        restarts = int(restarts) if restarts.isdigit() else 0
+        # Only complain about containers that are *supposed* to be up. Half this
+        # box's containers are deliberately stopped; alerting on those trains you
+        # to ignore the list, which is how the real one gets missed.
+        wanted_up = policy in ("always", "unless-stopped")
+        problem = ""
+        if status == "restarting":
+            problem = f"crash-looping ({restarts} restarts)"
+        elif status == "running" and health == "unhealthy":
+            problem = "unhealthy"          # a stopped container keeps its last
+                                           # health value; only live ones mean it
+        elif status == "exited" and wanted_up and code not in ("0", ""):
+            problem = f"exited {code} but restart={policy}"
+        rows.append({"name": name, "status": status, "restarts": restarts,
+                     "health": health, "exit_code": code, "policy": policy,
+                     "ok": not problem, "problem": problem,
+                     # flapping history worth seeing without being an alert
+                     "flapped": status == "running" and restarts > 3})
+    rows.sort(key=lambda c: (c["ok"], c["name"]))
+    return rows
+
+
+def failed_units() -> list[dict]:
+    """Every failed unit, user and system — not a hand-picked list.
+
+    WATCHED_UNITS names the ones whose health means something for agent work, but
+    a monitor that only looks where it was told to look misses exactly the thing
+    nobody predicted. This is the catch-all.
+    """
+    out_rows = []
+    for scope in ("--user", "--system"):
+        rc, out = run(["systemctl", scope, "list-units", "--failed",
+                       "--no-legend", "--no-pager", "--plain"], timeout=15)
+        if rc != 0:
+            continue
+        for line in out.splitlines():
+            parts = line.split()
+            if not parts or not parts[0].endswith((".service", ".timer", ".mount", ".socket")):
+                continue
+            out_rows.append({"unit": parts[0], "scope": scope.lstrip("-"),
+                             "state": " ".join(parts[1:4])})
+    return out_rows
+
+
+# ── other machines ───────────────────────────────────────────────────────────
+DASHBOARD_URL = "https://dashboard.callmedaddy.dedyn.io/api/agents"
+
+
+def remote_alerts(this_host: str) -> list:
+    """Alerts from every OTHER machine, via the dashboard everything pushes to.
+
+    Without this the bar only ever reports the laptop, and a server that has
+    been failing all night looks exactly like a server that is fine. Best
+    effort: the dashboard being unreachable must never delay a local scan."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(DASHBOARD_URL, timeout=6) as r:
+            data = json.loads(r.read().decode())
+    except Exception:  # noqa: BLE001 — offline is normal, not an error
+        return []
+    out = []
+    for h in data.get("hosts", []):
+        if h.get("host") == this_host:
+            continue
+        stale = h.get("stale")
+        for a in h.get("alerts", []):
+            if isinstance(a, dict):
+                a.setdefault("host", h.get("host", "?"))
+                out.append(a)
+            else:
+                out.append({"host": h.get("host", "?"), "headline": str(a),
+                            "detail": "", "rule": "unitfail",
+                            "subject": str(a), "triageable": False})
+        if stale:
+            out.append({"host": h.get("host", "?"),
+                        "headline": "has stopped reporting",
+                        "detail": f"No snapshot for {int((h.get('age_sec') or 0)//60)} "
+                                  f"minutes. It may be asleep, off the tailnet, or its "
+                                  f"push timer may have stopped.",
+                        "rule": "unitfail", "subject": h.get("host", "?"),
+                        "triageable": False, "remote": True})
+    for a in out:
+        a["remote"] = True
+    return out
+
+
+
+def snapshot() -> dict:
+    procs = processes()
+    agents_running = [p for p in procs if p.get("kind") == "headless"]
+    interactive = [p for p in procs if p.get("kind") in ("interactive", "ide")]
+    desktop = next((p for p in procs if p.get("kind") == "desktop"), None)
+    w = watcher_state()
+    trg = triggers()
+    jb = jobs()
+
+    # Alerts are objects, not sentences. A bar panel needs three separable
+    # things from each one: which machine it is about, a one-line headline, and
+    # the detail behind it that stays folded away until asked for. It also needs
+    # to know what to hand a triage agent, which a formatted string has thrown
+    # away by the time anything reads it.
+    host = socket.gethostname()
+
+    def alert(headline, detail="", rule="unitfail", subject="", fixable=True):
+        subj = subject or headline
+        # `fixable` says an agent could; watcher_blocked says whether it would
+        # actually be handed one. Both have to hold, and the reason it does not
+        # travels with the alert so a reader is not left guessing.
+        why = "" if fixable else "needs root"
+        why = why or watcher_blocked(rule, subj)
+        return {"host": host, "headline": headline, "detail": detail,
+                "rule": rule, "subject": subj,
+                "triageable": not why, "triage_block": why}
+
+    alerts = []
+    for t in trg:
+        if not t["armed"]:
+            alerts.append(alert(
+                f"nothing is armed to start an agent on {host}",
+                t["why"] + ". Until this is fixed, failures here are recorded "
+                           "but nothing acts on them.",
+                rule="unitfail", subject=t["name"], fixable=False))
+    for j in jb:
+        if not j["ok"]:
+            alerts.append(alert(
+                f"{j['name']} is failing",
+                (j.get("problem") or j["state"]) +
+                (f"\n\nUnit: {j['unit']}" if j.get("unit") else "") +
+                (f"\nScript: {j['script']}" if j.get("script") else ""),
+                rule="osd" if j["name"].startswith("sync") else "unitfail",
+                subject=j.get("unit") or j["name"]))
+    for a in agents_running:
+        idle = (a.get("transcript") or {}).get("idle_sec")
+        if idle is not None and idle > 300:
+            alerts.append(alert(
+                f"an agent has produced nothing for {int(idle // 60)} minutes",
+                f"pid {a['pid']} in {a.get('project') or '?'} is still running and "
+                f"holding {a.get('rss_mb', 0)}MB, but its transcript has not grown. "
+                f"It is probably wedged.",
+                subject=a.get("unit") or f"pid {a['pid']}", fixable=False))
+    dead = deprecated_names()
+    ctr = containers()
+    for c in ctr:
+        c["deprecated"] = c["name"] in dead
+        if not c["ok"] and not c["deprecated"]:
+            alerts.append(alert(f"container {c['name']} is unhealthy",
+                                c["problem"], subject=c["name"]))
+    fu = failed_units()
+    for u in fu:
+        u["deprecated"] = u["unit"] in dead or u["unit"].split(".")[0] in dead
+        if u["deprecated"]:
+            continue
+        _, why = last_outcome(u["unit"]) if u["scope"] == "user" else (None, "")
+        alerts.append(alert(
+            f"{u['unit']} failed",
+            (why or "No reason recorded in the journal.") +
+            f"\n\nScope: {u['scope']}. "
+            + ("Fixing a system unit needs root, so an agent will hand it back."
+               if u["scope"] == "system" else
+               "Inspect with: journalctl --user -u " + u["unit"]),
+            subject=u["unit"], fixable=u["scope"] == "user"))
+
+    if "--all" in sys.argv:
+        alerts += remote_alerts(host)
+
+    live_ids = {a.get("session_id") for a in agents_running if a.get("session_id")}
+    return {
+        "ts": time.time(),
+        "host": socket.gethostname(),
+        "sessions": recent_sessions(10, live_ids),
+        "notifications": recent_notifications(),
+        "user": pwd.getpwuid(UID).pw_name,
+        "agents": {"running": agents_running, "recent": w["recent"]},
+        "triggers": trg,
+        "jobs": jb,
+        "containers": ctr,
+        "failed_units": fu,
+        "deprecated": sorted(dead),
+        "interactive": {"count": len(interactive), "procs": interactive,
+                        "desktop": desktop},
+        "alerts": alerts,
+        # kept so an older dashboard/plugin build still renders something
+        "headless": len(agents_running),
+    }
+
+
+# ── output ───────────────────────────────────────────────────────────────────
+DIM, R, BOLD = "\033[38;5;242m", "\033[0m", "\033[1m"
+GREEN, RED, AMBER = "\033[38;5;150m", "\033[38;5;203m", "\033[38;5;215m"
+
+
+def ago(sec) -> str:
+    if sec is None:
+        return "?"
+    sec = int(sec)
+    if sec < 60:
+        return f"{sec}s"
+    if sec < 3600:
+        return f"{sec // 60}m"
+    if sec < 86400:
+        return f"{sec // 3600}h{(sec % 3600) // 60:02d}"
+    return f"{sec // 86400}d"
+
+
+def human(snap: dict) -> int:
+    tty = sys.stdout.isatty()
+    c = (lambda s, col: f"{col}{s}{R}") if tty else (lambda s, col: s)
+
+    # 1. What can start an agent.
+    print(c("TRIGGERS", BOLD) + c("   what can start a background agent", DIM))
+    for t in snap["triggers"]:
+        mark = c("●", GREEN if t["armed"] else RED)
+        state = "armed" if t["armed"] else "NOT ARMED"
+        print(f"  {mark} {t['name']:10} {state:10} {t['via']}")
+        print(c(f"      watches {', '.join(t['watches']) or 'nothing'}", DIM))
+        print(c(f"      {t['authority']} · {t['model']} · budget "
+                f"{t['budget']['used']}/{t['budget']['cap']} today · "
+                f"cooldown {t['cooldown_min']}min", DIM))
+        if t["why"]:
+            print(c(f"      {t['why']}", RED))
+
+    # 2. Agents running right now.
+    running = snap["agents"]["running"]
+    print("\n" + c("AGENTS RUNNING", BOLD) + f"   {len(running)}")
+    if not running:
+        print(c("  none", DIM))
+    for a in running:
+        t = a.get("transcript") or {}
+        idle = t.get("idle_sec")
+        live = f"out {ago(idle)} ago" if idle is not None else "no transcript"
+        mark = c("●", GREEN if (idle is not None and idle < 120) else AMBER)
+        print(f"  {mark} pid {a['pid']:<8} {a['project'][:24]:24} "
+              f"up {ago(a['runtime_sec']):>5}  {a['rss_mb']:>7.1f}M  {live}")
+        if a.get("unit"):
+            print(c(f"      {a['unit']}", DIM))
+
+    # 3. What they concluded.
+    print("\n" + c("RECENT AGENT RUNS", BOLD))
+    rec = snap["agents"]["recent"]
+    if not rec:
+        print(c("  none yet", DIM))
+    for r in rec[:6]:
+        icon = {"fixed": "✓", "no-change": "·", "needs-human": "✋"}.get(r["verdict"], "?")
+        col = RED if r["verdict"] in ("needs-human", "still failing") else DIM
+        cost = f"${r['cost_usd']:.2f}" if r.get("cost_usd") else "—"
+        print(f"  {c(icon, col)} {r['subject'][:32]:32} {cost:>7}  {r['summary'][:48]}")
+
+    # 4. The housekeeping around Claude.
+    print("\n" + c("CLAUDE JOBS", BOLD) + c("   do not start agents", DIM))
+    for j in snap["jobs"]:
+        mark = c("✓" if j["ok"] else "✗", GREEN if j["ok"] else RED)
+        print(f"  {mark} {j['name'][:24]:24} {j['detail'] or j['state']}")
+
+    iv = snap["interactive"]
+    extra = f" · Claude Desktop {iv['desktop']['procs']} procs" if iv.get("desktop") else ""
+    print(c(f"\n{iv['count']} interactive session(s) open{extra} — not agents, "
+            f"you are looking at those.", DIM))
+
+    if snap["alerts"]:
+        print("\n" + c("NEEDS ATTENTION", BOLD))
+        for a in snap["alerts"]:
+            print(f"  {c('!', AMBER)} [{a['host']}] {a['headline']}")
+            if a.get("detail"):
+                print(c("      " + a["detail"].splitlines()[0][:110], DIM))
+    return 0
+
+
+DASH_SSH = "ubuntu@100.122.63.6"
+DASH_CACHE = "Documents/Projects/dashboard/.cache_sources"
+
+
+def drain_triage(host: str) -> int:
+    """Run any alerts the dashboard has asked this machine to triage.
+
+    The dashboard cannot reach in here — this machine is the one that reaches
+    out — so a request left there is collected on the next push and started
+    here, the same `watcher triage` call the bar plugin's button makes."""
+    name = f"triage-queue-{host}.json"
+    local_dir = HOME / DASH_CACHE
+    if local_dir.is_dir():                       # the dashboard machine itself
+        f = local_dir / name
+        try:
+            raw = f.read_text()
+        except OSError:
+            return 0
+        f.unlink(missing_ok=True)
+    else:
+        try:
+            p = subprocess.run(
+                ["ssh", "-o", "ConnectTimeout=15", DASH_SSH,
+                 f"cat {DASH_CACHE}/{name} 2>/dev/null && rm -f {DASH_CACHE}/{name}"],
+                capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return 0
+        raw = p.stdout
+    if not raw.strip():
+        return 0
+    try:
+        reqs = json.loads(raw)
+    except ValueError:
+        sys.stderr.write("claude-status: unreadable triage queue, dropped\n")
+        return 0
+
+    watcher = HOME / ".local/bin/watcher"
+    if not watcher.exists():
+        sys.stderr.write("claude-status: triage requested but watcher is not installed\n")
+        return 0
+    started = 0
+    for r in reqs if isinstance(reqs, list) else []:
+        subject = str((r or {}).get("subject") or "").strip()
+        if not subject:
+            continue
+        subprocess.Popen(
+            [str(watcher), "triage", str(r.get("rule") or "unitfail"), subject,
+             str(r.get("body") or subject)],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        started += 1
+    if started:
+        print(f"triage: started {started} run(s) requested from the dashboard")
+    return started
+
+
+def push(snap: dict) -> int:
+    """Outbound-only, same shape and transport as push-usage.sh — the server
+    never reaches into the laptop."""
+    host = DASH_SSH
+    dest = f"{DASH_CACHE}/claude-status-{snap['host']}.json"
+    payload = json.dumps(snap)
+
+    # On the dashboard machine itself there is nothing to ssh to.
+    local_dir = HOME / DASH_CACHE
+    if local_dir.is_dir():
+        f = local_dir / f"claude-status-{snap['host']}.json"
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(payload)
+        tmp.replace(f)
+        print(f"wrote {len(payload)} bytes -> {f}")
+        return 0
+
+    p = subprocess.run(
+        ["ssh", "-o", "ConnectTimeout=15", host,
+         f"mkdir -p $(dirname {dest}) && cat > {dest}.tmp && mv {dest}.tmp {dest}"],
+        input=payload, text=True, capture_output=True, timeout=60)
+    if p.returncode != 0:
+        sys.stderr.write(f"claude-status: push failed — {p.stderr.strip()[:200]}\n")
+        return 1
+    print(f"pushed {len(payload)} bytes -> {host}:{dest}")
+    return 0
+
+
+# ── following a live agent ───────────────────────────────────────────────────
+def find_transcript(session_id: str) -> Path | None:
+    for d in PROJECTS.iterdir() if PROJECTS.is_dir() else []:
+        f = d / f"{session_id}.jsonl"
+        if f.exists():
+            return f
+    return None
+
+
+def _render(rec: dict) -> str:
+    """One transcript line as something readable.
+
+    A running agent cannot be attached to — it is headless, there is no terminal
+    to join. Its transcript is the only live window into it, so this renders the
+    turns rather than the raw JSONL you would otherwise be squinting at."""
+    role = (rec.get("message") or {}).get("role") or rec.get("type") or ""
+    content = (rec.get("message") or {}).get("content")
+    parts = []
+    if isinstance(content, str):
+        parts.append(content)
+    elif isinstance(content, list):
+        for c in content:
+            if not isinstance(c, dict):
+                continue
+            if c.get("type") == "text":
+                parts.append(c["text"])
+            elif c.get("type") == "tool_use":
+                inp = c.get("input") or {}
+                hint = inp.get("command") or inp.get("file_path") or inp.get("pattern") or ""
+                parts.append(f"[{c.get('name')}] {str(hint)[:160]}")
+            elif c.get("type") == "tool_result":
+                body = c.get("content")
+                if isinstance(body, list):
+                    body = " ".join(b.get("text", "") for b in body if isinstance(b, dict))
+                parts.append(f"  → {str(body or '')[:300]}")
+    text = "\n".join(p for p in parts if p).strip()
+    if not text:
+        return ""
+    tag = {"user": "\033[38;5;215myou\033[0m",
+           "assistant": "\033[38;5;150magent\033[0m"}.get(role, role)
+    return f"{tag}  {text}"
+
+
+def follow(session_id: str) -> int:
+    f = find_transcript(session_id)
+    if not f:
+        sys.stderr.write(f"claude-status: no transcript for session {session_id}\n")
+        return 2
+    print(f"following {f}  (ctrl-c to stop)\n")
+    seen = 0
+    try:
+        while True:
+            try:
+                lines = f.read_text(errors="replace").splitlines()
+            except OSError:
+                break
+            for line in lines[seen:]:
+                try:
+                    out = _render(json.loads(line))
+                except (ValueError, TypeError):
+                    continue
+                if out:
+                    print(out + "\n")
+            seen = len(lines)
+            time.sleep(1.5)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+# ── opening a session in a terminal ──────────────────────────────────────────
+# Terminals disagree about how to be handed a command, and getting it wrong
+# fails silently — the window flashes and closes with nothing to read. kitty in
+# particular has NO -e flag (its form is `kitty [options] program args...`);
+# passing the xterm-style -e is the single most likely reason a launcher button
+# appears to do nothing. Keeping this in the CLI rather than in QML means it can
+# be run and fixed from a shell instead of guessed at through the bar.
+#
+# `sh -lc` so a login shell supplies PATH; --hold / the read fallback so a
+# failure stays on screen instead of vanishing.
+TERMINALS = [
+    ("kitty", lambda c: ["kitty", "--hold", "sh", "-lc", c]),
+    ("ghostty", lambda c: ["ghostty", "-e", "sh", "-lc", c]),
+    ("foot", lambda c: ["foot", "sh", "-lc", c]),
+    ("wezterm", lambda c: ["wezterm", "start", "--", "sh", "-lc", c]),
+    ("alacritty", lambda c: ["alacritty", "-e", "sh", "-lc", c]),
+    ("gnome-terminal", lambda c: ["gnome-terminal", "--", "sh", "-lc", c]),
+    ("konsole", lambda c: ["konsole", "-e", "sh", "-lc", c]),
+    ("xterm", lambda c: ["xterm", "-e", "sh", "-lc", c]),
+]
+
+
+# Claude Code marks its own environment, and a session started inside one
+# inherits those markers — which makes the new session believe it is a CHILD and
+# silently turns transcript saving off ("inherited CLAUDE_CODE_CHILD_SESSION
+# marker"). A session you opened to read is worthless if it is not being
+# recorded, so the launcher hands the terminal a clean environment. This matters
+# whenever `claude-status open` is run from a terminal that is itself inside a
+# Claude session; from the bar the variables are absent anyway.
+CLAUDE_ENV_MARKERS = (
+    "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_BRIDGE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH", "CLAUDE_PID", "CLAUDE_EFFORT",
+)
+
+
+def clean_env() -> dict:
+    env = dict(os.environ)
+    for k in CLAUDE_ENV_MARKERS:
+        env.pop(k, None)
+    return env
+
+
+def spawn_terminal(inner: str, prefer: str = "") -> int:
+    """Open `inner` in a terminal window, detached from this process."""
+    hold = inner + "; rc=$?; [ $rc -ne 0 ] && { echo; echo \"exited $rc\"; }; " \
+                   "read -n1 -r -p 'press a key to close' _ 2>/dev/null || sleep 5"
+    order = TERMINALS
+    if prefer:
+        order = ([t for t in TERMINALS if t[0] == prefer]
+                 + [t for t in TERMINALS if t[0] != prefer])
+    for name, build in order:
+        if not shutil.which(name):
+            continue
+        argv = build(hold if name != "kitty" else inner)   # kitty --hold covers it
+        try:
+            subprocess.Popen(argv, start_new_session=True, env=clean_env(),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return 0
+        except OSError:
+            continue
+    sys.stderr.write("claude-status: no usable terminal found\n")
+    return 1
+
+
+def cmd_open(args: list) -> int:
+    def opt(name, default=""):
+        return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else default
+
+    prefer = opt("--term")
+    self_path = os.path.realpath(__file__)
+
+    if "--follow" in args:
+        sid = opt("--follow")
+        if not sid:
+            sys.stderr.write("claude-status: open --follow needs a session id\n")
+            return 2
+        return spawn_terminal(f"{self_path} --follow {sid}", prefer)
+
+    if "--resume" in args:
+        sid = opt("--resume")
+        if not sid:
+            sys.stderr.write("claude-status: open --resume needs a session id\n")
+            return 2
+        cwd = opt("--cwd") or str(HOME)
+        claude = shutil.which("claude") or str(HOME / ".local/bin/claude")
+        return spawn_terminal(f"cd {cwd!r} && exec {claude!r} --resume {sid}", prefer)
+
+    if "--focus" in args:
+        pane = opt("--focus")
+        if not pane:
+            return 2
+        # No terminal needed: herdr brings its own pane to the front.
+        subprocess.run(["herdr", "pane", "focus", pane], capture_output=True,
+                       timeout=10, env=clean_env())
+        return 0
+
+    if "--herdr" in args:
+        # herdr has no "run this command in a new session" flag, so this opens a
+        # herdr workspace in the session's directory rather than pretending to
+        # attach to the specific Claude run.
+        cwd = opt("--cwd") or str(HOME)
+        name = opt("--herdr") or os.path.basename(cwd.rstrip("/")) or "claude"
+        herdr = shutil.which("herdr") or str(HOME / ".local/bin/herdr")
+        return spawn_terminal(f"cd {cwd!r} && exec {herdr!r} --session {name}", prefer)
+
+    if "--run" in args:
+        cmd = opt("--run")
+        if not cmd:
+            return 2
+        cwd = opt("--cwd") or str(HOME)
+        return spawn_terminal(f"cd {cwd!r} && {cmd}", prefer)
+
+    if "--edit" in args:
+        path = opt("--edit")
+        if not path:
+            sys.stderr.write("claude-status: open --edit needs a path\n")
+            return 2
+        editor = os.environ.get("EDITOR") or shutil.which("nvim") or "vi"
+        return spawn_terminal(f"exec {editor} {path!r}", prefer)
+
+    sys.stderr.write("claude-status: open needs --follow/--resume/--herdr/--edit\n")
+    return 2
+
+
+# ── removing things ──────────────────────────────────────────────────────────
+# A one-click delete in a bar panel must not be final, so a "deleted" session or
+# run is moved into a trash directory rather than unlinked. Recovering it is a
+# mv. A script is only ever DISABLED, never deleted: removing the file that a
+# systemd unit runs from a panel button is a footgun, and stopping the unit is
+# the reversible 90% of what "get rid of this" means.
+TRASH = Path(os.path.expanduser("~/.local/state/claude-status/trash"))
+
+
+def _trash(src: Path, tag: str) -> bool:
+    if not src.exists():
+        return False
+    TRASH.mkdir(parents=True, exist_ok=True)
+    dest = TRASH / f"{tag}-{int(time.time())}-{src.name}"
+    try:
+        src.rename(dest)
+        return True
+    except OSError:
+        try:
+            shutil.move(str(src), str(dest))
+            return True
+        except (OSError, shutil.Error):
+            return False
+
+
+def cmd_rm(args: list) -> int:
+    def opt(name):
+        i = args.index(name) if name in args else -1
+        return args[i + 1] if 0 <= i < len(args) - 1 else ""
+
+    if "--session" in args:
+        sid = opt("--session")
+        f = find_transcript(sid) if sid else None
+        if not f:
+            sys.stderr.write(f"claude-status: no transcript {sid}\n")
+            return 2
+        ok = _trash(f, "session")
+        print(f"{'moved to trash' if ok else 'could not remove'}: {f}")
+        return 0 if ok else 1
+
+    if "--run" in args:
+        rid = opt("--run")
+        n = 0
+        for d, tag in ((WATCHER_STATE / "reports", "report"),
+                       (WATCHER_STATE / "incidents", "incident")):
+            for f in d.glob(f"*{rid}*.json") if d.is_dir() else []:
+                n += _trash(f, tag)
+        print(f"moved {n} file(s) to trash")
+        return 0 if n else 1
+
+    if "--job" in args:
+        unit = opt("--job")
+        if not unit:
+            return 2
+        rc1, _ = run(["systemctl", "--user", "stop", unit], timeout=30)
+        rc2, out = run(["systemctl", "--user", "disable", unit], timeout=30)
+        print(f"disabled {unit}" if rc2 == 0 else f"could not disable {unit}: {out.strip()[:160]}")
+        return 0 if rc2 == 0 else 1
+
+    sys.stderr.write("claude-status: rm needs --session/--run/--job\n")
+    return 2
+
+
+# ── onboarding another machine ───────────────────────────────────────────────
+# A new device needs three things to appear on the dashboard: this script, a
+# timer that pushes its snapshot, and the ssh route to send it. Everything else
+# (which sessions exist, which units are its scripts, what agents ran) it works
+# out for itself, so onboarding is a copy and an enable rather than a per-host
+# configuration file.
+PUSH_UNIT = """[Unit]
+Description=push this machine's Claude activity snapshot to the dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/claude-status --push
+Slice=background.slice
+OOMScoreAdjust=700
+MemoryMax=256M
+CPUWeight=20
+Nice=15
+TimeoutStartSec=90
+SuccessExitStatus=0 1
+"""
+
+PUSH_TIMER = """[Unit]
+Description=periodic Claude activity push to the dashboard
+
+[Timer]
+OnStartupSec=45s
+OnUnitActiveSec=60s
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
+"""
+
+
+def cmd_onboard(args: list) -> int:
+    if not args:
+        sys.stderr.write("claude-status: onboard needs an ssh target "
+                         "(e.g. `claude-status onboard ubuntu`)\n")
+        return 2
+    target = args[0]
+    src = os.path.realpath(__file__)
+
+    print(f"→ copying claude-status to {target}")
+    rc = subprocess.call(["ssh", target, "mkdir -p ~/.local/bin ~/.config/systemd/user"])
+    if rc != 0:
+        sys.stderr.write(f"claude-status: cannot reach {target}\n")
+        return 1
+    if subprocess.call(["scp", "-q", src, f"{target}:.local/bin/claude-status"]) != 0:
+        return 1
+    subprocess.call(["ssh", target, "chmod +x ~/.local/bin/claude-status"])
+
+    print("→ installing the push timer")
+    for name, body in (("claude-status-push.service", PUSH_UNIT),
+                       ("claude-status-push.timer", PUSH_TIMER)):
+        subprocess.run(["ssh", target, f"cat > ~/.config/systemd/user/{name}"],
+                       input=body, text=True)
+    subprocess.call(["ssh", target,
+                     "systemctl --user daemon-reload && "
+                     "systemctl --user enable --now claude-status-push.timer"])
+
+    print("→ first push")
+    rc, out = run(["ssh", target, "~/.local/bin/claude-status --push"], timeout=120)
+    print("  " + (out.strip().splitlines() or ["(no output)"])[-1])
+
+    print("\nOnboarded. It appears on the dashboard within a minute.")
+    print(f"Check it with:  ssh {target} claude-status")
+    return 0 if rc == 0 else 1
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    if "-h" in args or "--help" in args:
+        print(Path(__file__).read_text().split("\n\n")[0]
+              .replace("#!/usr/bin/env python3\n", ""))
+        return 0
+    if args and args[0] == "onboard":
+        return cmd_onboard(args[1:])
+    if args and args[0] == "rm":
+        return cmd_rm(args[1:])
+    if args and args[0] == "open":
+        return cmd_open(args[1:])
+    if "--follow" in args:
+        i = args.index("--follow")
+        if i + 1 >= len(args):
+            sys.stderr.write("claude-status: --follow needs a session id\n")
+            return 2
+        return follow(args[i + 1])
+    snap = snapshot()
+    if "--json" in args:
+        json.dump(snap, sys.stdout, indent=None if "--compact" in args else 2)
+        print()
+        return 0
+    if "--push" in args:
+        rc = push(snap)
+        # Same trip out: report state, then collect anything the dashboard has
+        # asked this machine to look at. A failed push means the queue is
+        # unreachable too, so there is nothing to collect.
+        if rc == 0:
+            try:
+                drain_triage(snap["host"])
+            except Exception as e:  # noqa: BLE001 — never let pickup break the push
+                sys.stderr.write(f"claude-status: triage pickup failed — {e}\n")
+        return rc
+    return human(snap)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

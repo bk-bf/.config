@@ -1,0 +1,21 @@
+[Unit]
+Description=push this machine's Claude activity snapshot to the dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/claude-status --push
+
+# Same posture as the osd sync units — this is batch work that must never
+# compete with the desktop. It is also allowed to fail quietly: the server
+# reports a machine that stopped pushing as stale, which is the correct
+# outcome when the laptop is asleep or off the tailnet.
+Slice=background.slice
+OOMScoreAdjust=700
+MemoryMax=256M
+CPUWeight=20
+IOWeight=20
+Nice=15
+TimeoutStartSec=90
+SuccessExitStatus=0 1

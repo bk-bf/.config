@@ -64,7 +64,30 @@ alias s2test="echo 'Close lid now. Note time. Open lid after 1 hour and run: s2r
 alias ht="hustle_tracker"
 alias t="tmux"
 alias lg="lazygit"
+# herdr launcher: `h -s <name>` attaches to a named session; otherwise passthrough
+h() {
+    if [[ "$1" == "-s" ]]; then
+        shift
+        herdr session attach "$@"
+    else
+        herdr "$@"
+    fi
+}
 alias op="opencode"
+# Default to `mosh ubuntu`/`mosh agent` for remote work — it survives laptop
+# lid-close/suspend (roaming UDP keeps the session pinned; reopen and it resumes).
+# Force a UTF-8 locale the servers actually have: the laptop forwards
+# de_DE.UTF-8 LC_* vars that aren't generated on the remotes, else mosh-server
+# falls back to US-ASCII and refuses to start. Plain `ssh` is left untouched —
+# use it deliberately when you need scrollback, port-forwarding, or scp/rsync.
+alias mosh='LC_ALL=C.UTF-8 command mosh'
+# Claude Desktop: Electron picks its password store by string-matching
+# XDG_CURRENT_DESKTOP against GNOME/KDE/Unity. Hyprland matches nothing, so it
+# falls back to the plaintext "basic" store and claims no keyring is installed —
+# sign-ins then don't survive a restart. gnome-keyring is running and owns
+# org.freedesktop.secrets; just point Electron at it. The launcher entry in
+# ~/.local/share/applications/com.anthropic.Claude.desktop carries the same flag.
+alias claude-desktop='command claude-desktop --password-store=gnome-libsecret'
 # claude launcher: `cld -lg` splits kitty (claude left, lazygit right, same dir)
 cld() {
     if [[ "$1" == "-lg" ]]; then
@@ -78,4 +101,125 @@ cld() {
     fi
     claude "$@"
 }
-alias tm="tmux"
+
+# zoxide — smart cd with frecency ranking (must init after oh-my-zsh loads).
+# `z <kw>` jumps to your most-visited matching dir; `zi` opens an fzf picker of
+# recent dirs. Plain `cd` is left untouched — zoxide just learns from it.
+command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
+
+# znvim <keyword...> — open nvim in the best zoxide-matched dir (by frecency).
+# e.g. `znvim yact` -> nvim in ~/Documents/local/Projects/yact. No arg -> plain nvim.
+# Bumps the dir's frecency too, so editing a project reinforces its `z` ranking.
+znvim() {
+    [ $# -eq 0 ] && { nvim; return; }
+    local dir
+    dir=$(zoxide query -- "$@" 2>/dev/null)
+    if [ -z "$dir" ]; then
+        echo "znvim: no zoxide match for '$*'" >&2
+        return 1
+    fi
+    zoxide add "$dir"
+    nvim "$dir"
+}
+
+# --- package output, recoloured by importance ------------------------------
+# Routine chatter (hook steps, snapper snapshots, integrity checks, progress
+# bars) is dimmed to grey; package names, sizes, prompts, warnings and errors
+# stay bright. Nothing is reworded, reordered or hidden — only the colour
+# changes, so yay still looks and behaves exactly like yay. `script` keeps a
+# pty attached so pacman renders at full width and prompts still work.
+# Bypass with NO_PACDIM=1, or by piping (a non-tty stdout skips the filter).
+# Preview the colouring without installing anything: pacdim --demo
+# $pipestatus is only readable on the line immediately after the pipeline —
+# any command in between (even `[`) overwrites it — so the shell branch is
+# picked up front rather than around the assignment.
+_pacdim_run() {
+    local cmd rc
+    cmd=$(printf '%q ' "$@")
+    if [ -n "$ZSH_VERSION" ]; then
+        script -qefc "$cmd" /dev/null | pacdim
+        rc=${pipestatus[1]}
+    else
+        script -qefc "$cmd" /dev/null | pacdim
+        rc=${PIPESTATUS[0]}
+    fi
+    return $rc
+}
+
+yay() {
+    if [ ! -t 1 ] || [ -n "$NO_PACDIM" ] || ! command -v pacdim >/dev/null 2>&1; then
+        command yay "$@"
+        return
+    fi
+    _pacdim_run yay "$@"
+}
+
+# Plain `pacman` — queries like -Q, -Ss, -Si.
+pacman() {
+    if [ ! -t 1 ] || [ -n "$NO_PACDIM" ] || ! command -v pacdim >/dev/null 2>&1; then
+        command pacman "$@"
+        return
+    fi
+    _pacdim_run pacman "$@"
+}
+
+# `sudo pacman` can't be caught by the pacman function above — sudo resolves
+# the binary itself, so the shell never sees a `pacman` word to expand. Hence
+# this narrow sudo wrapper: it only intervenes when the very first argument is
+# literally `pacman`, and hands every other sudo invocation straight through
+# untouched (including `sudo -u`, `sudo -i`, `sudo -S pacman`, etc).
+#
+# oh-my-zsh's correction.zsh sets `alias sudo='nocorrect sudo'`, and zsh will
+# not define a function whose name an alias already claims ("defining function
+# based on alias" -> parse error). Stash the alias, define the function, then
+# put it back verbatim: it re-expands onto the function rather than the binary,
+# so `nocorrect` keeps working.
+if [ -n "$ZSH_VERSION" ]; then
+    _pacdim_sudo_alias=$(alias sudo 2>/dev/null)
+    unalias sudo 2>/dev/null
+fi
+
+sudo() {
+    if [ "$1" = pacman ] && [ -t 1 ] && [ -z "$NO_PACDIM" ] \
+       && command -v pacdim >/dev/null 2>&1; then
+        _pacdim_run sudo "$@"
+        return
+    fi
+    command sudo "$@"
+}
+
+if [ -n "$ZSH_VERSION" ] && [ -n "$_pacdim_sudo_alias" ]; then
+    eval "alias $_pacdim_sudo_alias"
+fi
+unset _pacdim_sudo_alias
+
+# pac — shorthand for `sudo pacman`.
+pac() {
+    sudo pacman "$@"
+}
+
+# bgr <cmd...> — run something at background priority so it yields to the desktop.
+#
+# Launches into background.slice (CPUWeight=30 vs 100 elsewhere), so the command
+# gives way to the compositor, browser and interactive terminals under contention
+# — and still gets the whole machine when nothing else wants it. This is the way
+# to start anything long and CPU-hungry on this box: test runs, builds, watchers.
+#
+#   bgr npm test          bgr cargo build --release          bgr npx tsc --watch
+#
+# Why it matters: background test runners saturating the cores starve the CPU-side
+# work that feeds the compositor against an 8.3ms frame budget at 120Hz, which
+# shows up as dropped video frames. See .docs/performance/CPU_PRIORITY.md.
+#
+# The scope inherits the current directory, so run it from the project root and
+# prefer `npm test` over `npx` (npx downloads from the registry when it cannot
+# find a local binary, and may fetch the wrong major version).
+#
+# Named bgr, not bg: `bg` is a zsh builtin that resumes a suspended job.
+bgr() {
+    if [ $# -eq 0 ]; then
+        echo "bgr: usage: bgr <command> [args...]" >&2
+        return 2
+    fi
+    systemd-run --user --slice=background.slice --scope --quiet -- "$@"
+}

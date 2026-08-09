@@ -28,7 +28,7 @@ details (local only, not in public repo).
 | `~/.config/systemd/user/pkg-tracker.timer`                   | Fires the service daily                                           |
 | `~/.config/pkg-tracker.hook`                                 | Hook source — symlinked to `/etc/pacman.d/hooks/pkg-tracker.hook` |
 | `~/.config/sddm/sddm.conf`                                   | SDDM config — symlinked to `/etc/sddm.conf`                       |
-| `~/.config/grub/grub`                                        | GRUB config — symlinked to `/etc/default/grub`                    |
+| ~~`~/.config/grub/grub`~~                                     | **Stale (Jul 2026)** — this machine boots Limine, not GRUB; neither path exists. See [../boot/LIMINE.md](../boot/LIMINE.md) |
 | `~/.config/intel-undervolt/intel-undervolt.conf`             | Power limits — symlinked to `/etc/intel-undervolt.conf`           |
 | `~/.config/s2idle/s2idle-optimize.service`                   | S2idle systemd unit — symlinked to `/etc/systemd/system/`         |
 | `~/.config/s2idle/s2idle-optimize.sh`                        | S2idle script — symlinked to `/usr/local/bin/`                    |
@@ -105,7 +105,7 @@ chmod +x ~/.config/pkg-tracker.sh
 # Symlink all system-level config files (requires root)
 sudo ln -sf ~/.config/pkg-tracker.hook /etc/pacman.d/hooks/pkg-tracker.hook
 sudo ln -sf ~/.config/sddm/sddm.conf /etc/sddm.conf
-sudo ln -sf ~/.config/grub/grub /etc/default/grub
+# sudo ln -sf ~/.config/grub/grub /etc/default/grub   # STALE: Limine now, see ../boot/LIMINE.md
 sudo ln -sf ~/.config/intel-undervolt/intel-undervolt.conf /etc/intel-undervolt.conf
 sudo ln -sf ~/.config/s2idle/s2idle-optimize.service /etc/systemd/system/s2idle-optimize.service
 sudo chmod +x ~/.config/s2idle/s2idle-optimize.sh

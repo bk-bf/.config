@@ -31,13 +31,14 @@ The system reads the file from its expected path as normal — it never knows it
 | `~/.config` source                     | System path                                   | Purpose                                                                                                                                                        |
 | -------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sddm/sddm.conf`                       | `/etc/sddm.conf`                              | Reference template — `install.sh` writes this file directly (not symlinked) so `QT_SCALE_FACTOR` can be set conditionally based on detected display resolution |
-| `grub/grub`                            | `/etc/default/grub`                           | Kernel parameters (s2idle, i915, ASPM) — Galaxy Book only                                                                                                      |
-| `grub/galaxybook-top-level.cfg`        | `/etc/default/grub.d/galaxybook-top-level.cfg` | Sourced by grub-mkconfig — auto-selects highest `cachyos-galaxybook*` kernel — see [boot/GRUB_GALAXYBOOK_KERNEL.md](./boot/GRUB_GALAXYBOOK_KERNEL.md)         |
+| `limine/default-limine`                | `/etc/default/limine`                         | Limine `ENABLE_SORT` (linux-cachyos before -lts). Galaxy Book kernel params ride the live `/proc/cmdline` — see [boot/LIMINE.md](./boot/LIMINE.md)             |
+| `limine/theme.conf`                    | `<ESP>/limine.conf` (header)                  | Catppuccin-Mocha theme keys, injected into the Limine config header by `install.sh`                                                                            |
+| `limine/limine-splash.png`             | `<ESP>/limine-splash.png`                     | Limine boot wallpaper (copied to the ESP)                                                                                                                      |
 | `intel-undervolt/intel-undervolt.conf` | `/etc/intel-undervolt.conf`                   | PL1/PL2 power limits                                                                                                                                           |
 | `s2idle/s2idle-optimize.service`       | `/etc/systemd/system/s2idle-optimize.service` | Runtime PM systemd unit                                                                                                                                        |
 | `s2idle/s2idle-optimize.sh`            | `/usr/local/bin/s2idle-optimize.sh`           | Runtime PM script                                                                                                                                              |
 | `pkg-tracker.hook`                     | `/etc/pacman.d/hooks/pkg-tracker.hook`        | Auto-updates pkglist.txt on package changes                                                                                                                    |
-| `docs/99-disable-touchscreen.rules`    | `/etc/udev/rules.d/99-disable-touchscreen.rules` | Suppresses GXTP7936 touchscreen from libinput — see [TOUCHSCREEN_UDEV.md](./TOUCHSCREEN_UDEV.md) |
+| `.docs/udev/99-disable-touchscreen.rules`    | `/etc/udev/rules.d/99-disable-touchscreen.rules` | Suppresses GXTP7936 touchscreen from libinput — see [TOUCHSCREEN_UDEV.md](./TOUCHSCREEN_UDEV.md) |
 
 ---
 
@@ -49,18 +50,16 @@ After cloning the repo and installing packages, run:
 sudo mkdir -p /etc/pacman.d/hooks
 
 sudo ln -sf ~/.config/sddm/sddm.conf /etc/sddm.conf
-sudo ln -sf ~/.config/grub/grub /etc/default/grub
-sudo mkdir -p /etc/default/grub.d
-sudo install -m 0644 ~/.config/grub/galaxybook-top-level.cfg /etc/default/grub.d/galaxybook-top-level.cfg
+sudo install -m 0644 ~/.config/limine/default-limine /etc/default/limine
 sudo ln -sf ~/.config/intel-undervolt/intel-undervolt.conf /etc/intel-undervolt.conf
 sudo ln -sf ~/.config/s2idle/s2idle-optimize.service /etc/systemd/system/s2idle-optimize.service
 sudo chmod +x ~/.config/s2idle/s2idle-optimize.sh
 sudo ln -sf ~/.config/s2idle/s2idle-optimize.sh /usr/local/bin/s2idle-optimize.sh
 sudo ln -sf ~/.config/pkg-tracker.hook /etc/pacman.d/hooks/pkg-tracker.hook
-sudo cp ~/.config/docs/99-disable-touchscreen.rules /etc/udev/rules.d/
+sudo cp ~/.config/.docs/udev/99-disable-touchscreen.rules /etc/udev/rules.d/
 
 sudo systemctl daemon-reload
-sudo grub-mkconfig -o /boot/grub/grub.cfg
+sudo limine-update
 sudo systemctl enable --now s2idle-optimize.service
 sudo systemctl enable --now intel-undervolt
 ```
@@ -73,7 +72,7 @@ sudo systemctl enable --now intel-undervolt
 that would silently degrade the system if missing after a restore:
 
 - Display manager config (SDDM)
-- Bootloader kernel parameters (GRUB)
+- Bootloader config & kernel cmdline (Limine)
 - Hardware tuning (undervolting, power limits)
 - System service units you authored
 - Pacman hooks
@@ -90,7 +89,7 @@ useless elsewhere, or that package updates are expected to own entirely:
 
 ## Package Update Behaviour
 
-For files marked as `backup` in their package (e.g. `/etc/default/grub`), pacman compares
+For files marked as `backup` in their package (e.g. `/etc/intel-undervolt.conf`), pacman compares
 checksums. Since the symlink target differs from the package default, pacman places a `.pacnew`
 file instead of overwriting — your tracked file is left untouched.
 
@@ -106,9 +105,9 @@ Merge any relevant changes into the `~/.config` source, then delete the `.pacnew
 
 ## Related
 
-- [packages/PACKAGE_TRACKING.md](../packages/PACKAGE_TRACKING.md) — full file map and restore steps including these symlinks
-- [sddm/HIDPI.md](../sddm/HIDPI.md) — why `sddm.conf` exists outside `~/.config` natively
-- [battery/S2IDLE_OPTIMIZATION.md](../battery/S2IDLE_OPTIMIZATION.md) — s2idle service and script
-- [performance/THERMAL_OPTIMIZATION.md](../performance/THERMAL_OPTIMIZATION.md) — intel-undervolt config
+- [packages/PACKAGE_TRACKING.md](./packages/PACKAGE_TRACKING.md) — full file map and restore steps including these symlinks
+- [sddm/HIDPI.md](./sddm/HIDPI.md) — why `sddm.conf` exists outside `~/.config` natively
+- [battery/S2IDLE_OPTIMIZATION.md](./battery/S2IDLE_OPTIMIZATION.md) — s2idle service and script
+- [performance/THERMAL_OPTIMIZATION.md](./performance/THERMAL_OPTIMIZATION.md) — intel-undervolt config
 
-The same symlink pattern is also used for **private content** excluded from the public repo: `~/.config/opencode/commands` and `documentation/private/` are symlinks into `~/.local/share/` and tracked in a private bare repo on the local server. See [IDE_SETUP.md](./IDE_SETUP.md) (Opencode section) and `documentation/private/OPENCODE_INFRA.md` / `documentation/private/PKGLIST_INFRA.md`.
+The same symlink pattern is also used for **private content** excluded from the public repo: `~/.config/opencode/commands` and `documentation/private/` are symlinks into `~/.local/share/` and tracked in a private bare repo on the local server. See `documentation/private/OPENCODE_INFRA.md` / `documentation/private/PKGLIST_INFRA.md`.

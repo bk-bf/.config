@@ -12,6 +12,10 @@
 # Host-specific symlink → ~/.local/share/pkglist/hosts/<host>/pkglist.txt
 /pkglist.txt
 
+# App-generated junk at repo root (Qt file-dialog history, electron update cache)
+/QtProject.conf
+/electron-builder.json
+
 # Whitelisted top-level directories
 !/.githooks/
 !/.vscode/
@@ -33,10 +37,12 @@
 !/intel-undervolt/
 !/kitty/
 !/lazygit/
+!/limine/
 !/mpv/
 !/noctalia/
 # nvim/ — now lives in tdl repo, symlinked from ~/.config/nvim
 !/nvim-treemux/
+!/osync/
 !/pamac/
 !/qt6ct/
 !/s2idle/
@@ -45,6 +51,7 @@
 !/sioyek/
 !/systemd/
 !/tmux/
+!/uwsm/
 !/xdg-desktop-portal/
 !/xsettingsd/
 
@@ -52,6 +59,11 @@
 !/.claude/
 /.claude/*
 !/.claude/settings.json
+
+# Track only config.toml; the rest of herdr/ is sockets, logs and session state
+!/herdr/
+/herdr/*
+!/herdr/config.toml
 
 # Cache directories
 **/Cache/
@@ -247,11 +259,13 @@ ffssb/
 opencode/node_modules
 opencode/commands
 opencode/bun.lock
+ 
+
 
 # App-generated churn — rewritten by KDE apps / xdg on use, not hand-managed
 /kdeglobals
 /dolphinrc
 /mimeapps.list
-/electron-builder.json
 # Pamac window geometry (width/height) — rewritten on every resize, per-machine
 /pamac/config
+osync/*.bak-*

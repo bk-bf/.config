@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Scan the commits being pushed for secrets. This is the catch-all that pre-commit
+# misses: pre-commit only fires on `git commit`, so cherry-pick / rebase / merge /
+# `--no-verify` / WIP-prefixed commits reach here unscanned. Runs on every push.
+# Override (rarely): git push --no-verify
+set -uo pipefail
+
+command -v gitleaks >/dev/null 2>&1 || {
+  echo "⚠ gitleaks not installed — skipping push secret scan (sudo pacman -S gitleaks)" >&2
+  exit 0
+}
+
+# Range-scan command, robust across gitleaks versions.
+scan() {  # $1 = git-log range/opts string
+  if gitleaks git --help 2>&1 | grep -q -- '--log-opts'; then
+    gitleaks git --redact --log-opts="$1" .
+  else
+    gitleaks detect --redact --log-opts="$1" --source .
+  fi
+}
+
+zero='0000000000000000000000000000000000000000'
+status=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue                 # branch deletion — nothing to scan
+  if [ "$remote_sha" = "$zero" ]; then
+    opts="$local_sha --not --remotes=origin"             # new branch: only its new commits
+  else
+    opts="$remote_sha..$local_sha"                       # update: only the pushed range
+  fi
+  [ -n "$(git rev-list -n1 $opts 2>/dev/null)" ] || continue   # empty range — skip
+  scan "$opts" || status=1
+done
+
+if [ "$status" -ne 0 ]; then
+  echo "" >&2
+  echo "🚫 gitleaks found a potential secret in commits being pushed — push blocked." >&2
+  echo "   Fix the history, or override with: git push --no-verify" >&2
+  exit 1
+fi

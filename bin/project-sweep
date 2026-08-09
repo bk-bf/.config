@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""Sweep local git repos and record which projects are dead, so monitors stop
+crying about them.
+
+The prompt for this: a container crash monitor reported signoz and yact as
+broken. Both are deprecated — the alerts were true and useless, and a monitor
+that reports things you have already abandoned is one you stop reading, which is
+how the real failure (a two-month-dead ntfy swallowing every alert) survived.
+
+Deprecation is not a thing you remember to write down, but git already knows it:
+a repo nobody has touched in months, or whose README says so, is deprecated
+whether or not anyone announced it. So derive it, write it where both the agent
+and the monitors can see it, and let a human override.
+
+Writes two things:
+  ~/.claude/project-status.json   machine-readable, read by claude-status
+  a memory note                   so the agent knows without being told
+"""
+
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOTS = [Path.home() / "Documents" / "local" / "Projects"]
+STATUS = Path.home() / ".claude" / "project-status.json"
+OVERRIDES = Path.home() / ".config" / "project-status-overrides.json"
+
+DORMANT_DAYS = 60          # untouched this long → dormant
+DEPRECATED_DAYS = 180      # …this long → treat as deprecated
+MARKERS = re.compile(r"\b(deprecated|archived|abandoned|discontinued|"
+                     r"decommissioned|superseded|no longer maintained)\b", re.I)
+
+
+def git(repo: Path, *args, timeout=15) -> str:
+    try:
+        p = subprocess.run(["git", "-C", str(repo), *args],
+                           capture_output=True, text=True, timeout=timeout)
+        return p.stdout.strip() if p.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def readme_marker(repo: Path) -> str:
+    """A README that says 'deprecated' in its first lines is the strongest signal
+    there is — someone wrote it down deliberately."""
+    for name in ("README.md", "README", "readme.md"):
+        f = repo / name
+        if not f.exists():
+            continue
+        try:
+            head = f.read_text(errors="replace")[:1500]
+        except OSError:
+            continue
+        m = MARKERS.search(head)
+        if m:
+            line = next((l.strip() for l in head.splitlines() if m.group(0).lower() in l.lower()), "")
+            return line[:160]
+    return ""
+
+
+def classify(repo: Path) -> dict:
+    last = git(repo, "log", "-1", "--format=%ct")
+    ts = int(last) if last.isdigit() else 0
+    age_days = int((time.time() - ts) / 86400) if ts else None
+    marker = readme_marker(repo)
+    commits = git(repo, "rev-list", "--count", "HEAD")
+
+    if marker:
+        state, why = "deprecated", f"README says so: {marker}"
+    elif age_days is None:
+        state, why = "unknown", "no git history"
+    elif age_days >= DEPRECATED_DAYS:
+        state, why = "deprecated", f"no commit in {age_days} days"
+    elif age_days >= DORMANT_DAYS:
+        state, why = "dormant", f"no commit in {age_days} days"
+    else:
+        state, why = "active", f"last commit {age_days} days ago"
+    return {"name": repo.name, "path": str(repo), "state": state, "why": why,
+            "last_commit": ts, "age_days": age_days,
+            "commits": int(commits) if commits.isdigit() else 0}
+
+
+def sweep() -> list[dict]:
+    repos = []
+    for root in ROOTS:
+        if not root.is_dir():
+            continue
+        for d in sorted(root.iterdir()):
+            if d.is_dir() and (d / ".git").exists():
+                repos.append(classify(d))
+    # A human override always wins — the sweep infers, it does not decide.
+    try:
+        over = json.loads(OVERRIDES.read_text())
+    except (OSError, ValueError):
+        over = {}
+    for r in repos:
+        if r["name"] in over:
+            r["state"], r["why"] = over[r["name"]], "set by hand"
+    return repos
+
+
+def write_status(repos: list[dict]) -> None:
+    STATUS.parent.mkdir(parents=True, exist_ok=True)
+    dead = {r["name"] for r in repos if r["state"] == "deprecated"}
+    # Overrides can name things that are not local repos at all — a container on
+    # the server, a systemd unit. Those are exactly the ones a monitor keeps
+    # paging about, so they belong in the set even with no repo behind them.
+    try:
+        for k, v in json.loads(OVERRIDES.read_text()).items():
+            if not k.startswith("_") and v == "deprecated":
+                dead.add(k)
+    except (OSError, ValueError):
+        pass
+    dead = sorted(dead)
+    STATUS.write_text(json.dumps(
+        {"ts": time.time(), "host": socket.gethostname(),
+         "deprecated": dead, "projects": repos}, indent=2) + "\n")
+
+
+def write_memory(repos: list[dict]) -> Path | None:
+    """One note, not one per project — the memory index has a soft cap and a
+    per-repo note would eat it for facts that change every sweep."""
+    by = {}
+    for r in repos:
+        by.setdefault(r["state"], []).append(r)
+    silo = Path.home() / ".claude" / "projects" / "-home-kirill-Documents-local-Projects" / "memory"
+    if not silo.is_dir():
+        return None
+    lines = ["Derived by `project-sweep` from git history — regenerated on a timer, "
+             "so treat it as current rather than as something someone maintained.\n"]
+    for state in ("deprecated", "dormant", "active", "unknown"):
+        rs = by.get(state) or []
+        if not rs:
+            continue
+        lines.append(f"\n**{state}** ({len(rs)})\n")
+        for r in sorted(rs, key=lambda x: x["name"]):
+            lines.append(f"- `{r['name']}` — {r['why']}")
+    lines.append("\n**Why this exists:** monitors reported signoz and yact as broken "
+                 "when both were already abandoned. Alerts about things you have "
+                 "given up on are the reason people stop reading alerts. Check this "
+                 "before diagnosing a failure in a project you have not touched "
+                 "recently, and before proposing work on one.")
+    lines.append("\nOverride any row by hand in `~/.config/project-status-overrides.json` "
+                 "(`{\"name\": \"active\"}`); the sweep infers, it does not decide.")
+    body = "\n".join(lines)
+    dead = [r["name"] for r in by.get("deprecated", [])]
+    desc = (f"Which local projects are active, dormant or deprecated — derived from git "
+            f"history; deprecated: {', '.join(dead[:6]) or 'none'}")
+    sys.path.insert(0, str(Path.home() / "Documents/local/Projects/dashboard"))
+    import memory_store as m
+    m.save("-home-kirill-Documents-local-Projects", "project-lifecycle", desc,
+           "project", body, scope="universal", tags=["generated"])
+    return silo / "project-lifecycle.md"
+
+
+def ship_to_peers() -> str:
+    """The laptop is where the repos live, so it is the only machine that can
+    derive this — but the server's monitor is the one drowning in alerts about
+    dead stacks. Push it there; failing quietly is correct, the sweep must not
+    depend on the peer being up."""
+    try:
+        r = subprocess.run(["scp", "-q", "-o", "ConnectTimeout=8", str(STATUS),
+                            "ubuntu:/home/ubuntu/.claude/project-status.json"],
+                           capture_output=True, timeout=30)
+        return "shipped to ubuntu" if r.returncode == 0 else "peer unreachable"
+    except (OSError, subprocess.SubprocessError):
+        return "peer unreachable"
+
+
+def main() -> int:
+    repos = sweep()
+    write_status(repos)
+    note = write_memory(repos)
+    counts = {}
+    for r in repos:
+        counts[r["state"]] = counts.get(r["state"], 0) + 1
+    print(f"{len(repos)} repos — " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
+    for r in repos:
+        if r["state"] == "deprecated":
+            print(f"  deprecated  {r['name']:26s} {r['why']}")
+    print(f"wrote {STATUS}" + (f" and {note.name}" if note else "") + f" — {ship_to_peers()}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

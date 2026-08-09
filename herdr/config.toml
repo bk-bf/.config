@@ -1,0 +1,39 @@
+onboarding = false
+[keys]
+prefix = "ctrl+space"
+split_vertical = "ctrl+shift+v"
+split_horizontal = "ctrl+shift+h"
+focus_pane_left = "ctrl+shift+left"
+focus_pane_right = "ctrl+shift+right"
+focus_pane_up = "ctrl+shift+up"
+focus_pane_down = "ctrl+shift+down"
+close_pane = "ctrl+q"
+new_tab = "ctrl+n"
+next_tab = "ctrl+tab"
+previous_tab = "ctrl+shift+tab"
+next_workspace = "ctrl+shift+space"
+goto = "ctrl+f"
+
+[[keys.command]]
+key = "prefix+v"
+type = "shell"
+command = "/home/kirill/.config/bin/herdr-claude right"
+
+[[keys.command]]
+key = "prefix+h"
+type = "shell"
+command = "/home/kirill/.config/bin/herdr-claude down"
+
+[ui]
+agent_panel_sort = "spaces"
+
+show_agent_labels_on_pane_borders = false
+[theme]
+name = "tokyo-night"
+auto_switch = false
+
+[experimental]
+pane_history = false
+
+[ui.toast]
+delivery = "herdr"
