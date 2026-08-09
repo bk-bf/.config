@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Copy the clipboard image to a remote host and print the path it landed on.
+#
+# A Claude Code running over ssh/mosh reads the clipboard of the machine it
+# runs on, which is the server's — always empty. The image has to travel as a
+# file instead. Uploads to a temp name and renames, so a reader never opens a
+# half-written file.
+#
+#   clip-push                 # -> /home/ubuntu/.cache/clipboard/clip-<stamp>.png
+#   clip-push --host aspect
+#   clip-push --name foo.png  # caller picked the name and already knows the path
+
+set -euo pipefail
+
+host=ubuntu
+dir=.cache/clipboard
+name=
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        --host) host=$2; shift 2 ;;
+        --dir)  dir=$2;  shift 2 ;;
+        --name) name=$2; shift 2 ;;
+        -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+        *) printf 'clip-push: unknown argument %s\n' "$1" >&2; exit 2 ;;
+    esac
+done
+
+mime=$(wl-paste --list-types 2>/dev/null | grep -m1 '^image/') || {
+    printf 'clip-push: no image on the clipboard\n' >&2
+    exit 1
+}
+
+if [ -z "$name" ]; then
+    ext=${mime#image/}
+    [ "$ext" = jpeg ] && ext=jpg
+    name="clip-$(date +%Y%m%d-%H%M%S).$ext"
+fi
+
+tmp=$(mktemp) || exit 1
+trap 'rm -f "$tmp"' EXIT
+
+wl-paste --type "$mime" > "$tmp"
+[ -s "$tmp" ] || {
+    printf 'clip-push: clipboard reported %s but returned nothing\n' "$mime" >&2
+    exit 1
+}
+
+ssh -o ConnectTimeout=10 "$host" "
+    set -e
+    mkdir -p \"\$HOME/$dir\"
+    cat > \"\$HOME/$dir/.$name.part\"
+    mv \"\$HOME/$dir/.$name.part\" \"\$HOME/$dir/$name\"
+    find \"\$HOME/$dir\" -type f -mtime +7 -delete 2>/dev/null || true
+    printf '%s\n' \"\$HOME/$dir/$name\"
+" < "$tmp"
