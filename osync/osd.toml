@@ -1,0 +1,80 @@
+# osd compose — one file, many sync connections.
+# Managed by osd (a add · t endpoint · d direction), editable by hand.
+# Each [[connection]] is a two-way osync job between this machine and a host.
+
+[settings]
+# OFF deliberately. osd re-notifies on every timer retry with no cooldown of
+# its own — claude-sessions-laptop retries every 60s, so a blocked sync produced
+# a toast a minute, indefinitely. journal-notify.sh (~/.config/hypr/scripts/)
+# already watches osd's journal output under an escalating cooldown and is the
+# single notification path on this machine. A manual TUI sync still prints the
+# reason to stderr in front of you. Set back to true to restore direct toasts.
+notify = false
+notify_cmd = "notify-send"
+delete_guard = 25
+node = "cachyos-x8664"
+yeet_hub = "ubuntu"
+
+[defaults]
+user = "kirill"
+key = "~/.ssh/id_ed25519"
+soft_delete_days = 30
+conflict_backup_days = 30
+
+[[connection]]
+name = "claude-sessions-laptop"
+local = "/home/kirill/.claude/projects"
+remote = "/home/ubuntu/claude-code-sessions"
+direction = "send"
+mode = "ts"
+user = "ubuntu"
+key = "/home/kirill/.ssh/id_ed25519"
+ts_host = "ubuntu"
+ts_port = 22
+ssh_host = ""
+ssh_port = 22
+# Mirrors RSYNC_EXCLUDE_PATTERN in ~/.config/osync/claude-sessions-laptop.conf;
+# see that file for why each entry is here. This copy is the one osync reads —
+# osd re-renders ~/.cache/osync/generated/claude-sessions-laptop.conf from this
+# line on every sync, so an exclude that lives only in the .conf is discarded.
+exclude = ".osync-part;.DS_Store;*.tmp;*.swp;*.part;.hidden-sessions.json;bridge-pointer.json;/-home-kirill-Documents-Personal-Documents-Einb-rgerung/9694fe51-baf7-4863-b3a8-122738bda63e.jsonl"
+auto = "periodic"
+interval = "1m"
+
+[[connection]]
+name = "documents_remote"
+local = "/home/kirill/Documents/remote"
+remote = "/home/ubuntu/Documents/remote"
+direction = "send"
+mode = "ts"
+user = "ubuntu"
+key = "/home/kirill/.ssh/id_ed25519"
+ts_host = "ubuntu"
+ts_port = 22
+ssh_host = ""
+ssh_port = 22
+# Mirrors RSYNC_EXCLUDE_PATTERN in ~/.config/osync/documents-remote.conf; see
+# that file for why each entry is here. This copy is the one osync reads.
+exclude = ".git;.svn;.hg;node_modules;__pycache__;.venv;venv;target;dist;build;.cache;.mypy_cache;.pytest_cache;.smart-env;.DS_Store;*.pyc;*.swp;*.tmp;*.part;.osync-part"
+auto = "periodic"
+interval = "5m"
+
+[[connection]]
+name = "memory-universal"
+# Only scope:universal notes land here — facts that hold on any machine. Device
+# notes (this laptop's RAM, the server's docker stack) are deliberately excluded
+# upstream by claude-memory-sync, because a fact that is true here and false
+# there is worse than a missing one. Two-way, so another device can add to it.
+local = "/home/kirill/.claude/memory-universal"
+remote = "/home/ubuntu/memory-universal"
+direction = "sync"
+mode = "ts"
+user = "ubuntu"
+key = "/home/kirill/.ssh/id_ed25519"
+ts_host = "ubuntu"
+ts_port = 22
+ssh_host = ""
+ssh_port = 22
+exclude = ".osync-part;.DS_Store;*.tmp;*.swp;*.part"
+auto = "periodic"
+interval = "5m"
