@@ -1,0 +1,7 @@
+[Unit]
+Description=Copy the portable Claude skills to the machines that run background sessions
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.config/bin/claude-skills-sync
