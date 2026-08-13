@@ -10,7 +10,7 @@
 # upscale) that are not mirrored from here.
 set -euo pipefail
 
-PORTABLE=(revertible-change orchestrator implement fork handoff branch-work debugging)
+PORTABLE=(revertible-change orchestrator implement fork handoff branch-work debugging sideagent)
 HOSTS=(ubuntu)
 SRC="$HOME/.claude/skills"
 
