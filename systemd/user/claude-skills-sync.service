@@ -1,5 +1,5 @@
 [Unit]
-Description=Copy the portable Claude skills to the machines that run background sessions
+Description=Copy the Claude skills to the machines that run background sessions
 After=network-online.target
 
 [Service]

@@ -3,24 +3,41 @@
 # in its own ~/.claude/skills, so a prompt naming a skill that lives only on the
 # laptop fails there — which is exactly how /fix ran without revertible-change.
 #
-# Only the portable ones. hyprland, noctalia, zen-browser, herdr, visual-dev,
-# laptop-power, laptop-hardware, system-resources, dotfiles, sudo-and-polkit and
-# watcher are about a laptop and a desktop the server does not have, and shipping
-# them would invite an agent to reach for hyprctl, a cgroup weight or a pacman
-# hook on a headless box. Never --delete the whole directory: the server has
-# skills of its own (notify, offload, sideagent, upscale) that are not mirrored
-# from here.
+# Every skill goes, not a chosen few. This used to ship a PORTABLE allowlist that
+# held back hyprland, noctalia, zen-browser, laptop-power, laptop-hardware,
+# system-resources, dotfiles, sudo-and-polkit and watcher, on the grounds that a
+# desktop skill on a headless box invites an agent to reach for hyprctl, a cgroup
+# weight or a pacman hook. That risk is accepted now: the allowlist left server
+# sessions with about five skills, and having them all there is worth more than
+# being protected from the desktop ones.
+#
+# Two things must stay as they are. --delete is applied per skill directory,
+# never to ~/.claude/skills itself — the server has skills of its own (notify,
+# offload, upscale) that are not mirrored from here and must survive every run.
+# And a skill that is a *symlink* here belongs to a project repo, which installs
+# it on each machine itself; `mon` is one. Sending it would write through the
+# server's matching symlink straight into that repo's checkout and leave it
+# dirty, so those are skipped and the repo keeps installing its own.
 set -euo pipefail
 
-PORTABLE=(revertible-change orchestrator implement fork handoff branch-work debugging sideagent)
 HOSTS=(ubuntu)
 SRC="$HOME/.claude/skills"
 
+[ -d "$SRC" ] || { echo "no $SRC — nothing to sync" >&2; exit 0; }
+
+skills=(); owned=()
+for d in "$SRC"/*/; do
+  [ -d "$d" ] || continue
+  s="$(basename "$d")"
+  if [ -L "$SRC/$s" ]; then owned+=("$s"); else skills+=("$s"); fi
+done
+[ ${#skills[@]} -gt 0 ] || { echo "no skills in $SRC" >&2; exit 0; }
+[ ${#owned[@]} -eq 0 ] || echo "repo-owned, installed by their own project: ${owned[*]}"
+
 for host in "${HOSTS[@]}"; do
-  for s in "${PORTABLE[@]}"; do
-    [ -d "$SRC/$s" ] || continue
+  for s in "${skills[@]}"; do
     rsync -aL --delete -e 'ssh -o BatchMode=yes -o ConnectTimeout=10' \
       "$SRC/$s/" "$host:.claude/skills/$s/"
   done
-  echo "skills synced to $host: ${PORTABLE[*]}"
+  echo "skills synced to $host (${#skills[@]}): ${skills[*]}"
 done
