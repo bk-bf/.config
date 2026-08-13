@@ -3,11 +3,13 @@
 # in its own ~/.claude/skills, so a prompt naming a skill that lives only on the
 # laptop fails there — which is exactly how /fix ran without revertible-change.
 #
-# Only the portable ones. hyprland, noctalia, zen-browser, herdr and visual-dev
-# are about a desktop the server does not have, and shipping them would invite
-# an agent to reach for hyprctl on a headless box. Never --delete the whole
-# directory: the server has skills of its own (notify, offload, sideagent,
-# upscale) that are not mirrored from here.
+# Only the portable ones. hyprland, noctalia, zen-browser, herdr, visual-dev,
+# laptop-power, laptop-hardware, system-resources, dotfiles, sudo-and-polkit and
+# watcher are about a laptop and a desktop the server does not have, and shipping
+# them would invite an agent to reach for hyprctl, a cgroup weight or a pacman
+# hook on a headless box. Never --delete the whole directory: the server has
+# skills of its own (notify, offload, sideagent, upscale) that are not mirrored
+# from here.
 set -euo pipefail
 
 PORTABLE=(revertible-change orchestrator implement fork handoff branch-work debugging sideagent)

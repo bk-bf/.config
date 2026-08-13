@@ -1,112 +1,38 @@
-# `.docs` — machine documentation
+# `.docs` — history
 
-Durable findings about this laptop (Samsung Galaxy Book4 Ultra, Intel Core Ultra 7 155H / Arc
-iGPU, CachyOS, Hyprland under UWSM). Each doc records a *mechanism* and how it was verified, not
-just a recipe.
+Documentation of how this laptop is currently set up lives in Claude Code
+skills at `~/.claude/skills/`, not here. A skill loads itself when it is
+relevant; a markdown file is only read if someone goes looking for it.
 
-**Conventions**
+| Subject | Skill |
+|---|---|
+| Heat, battery, suspend, idle blanking, scx/VRR, workspace restore | `laptop-power` |
+| Speakers, touchpad/touchscreen, battery not detected, greeter scaling | `laptop-hardware` |
+| cgroup priority, memory pressure, leaked processes, session losses | `system-resources` |
+| This repo: `/etc` symlinks, package tracking, pacdim, Limine | `dotfiles` |
+| sudo/PAM failures, faillock, the polkit agent | `sudo-and-polkit` |
+| Compositor, UWSM session targets, portals, frame drops | `hyprland` |
+| Theme propagation from Noctalia to GTK/kitty/Qt | `noctalia` |
+| Browser prefs, hardware decode, the RAM leak | `zen-browser` |
+| Journal notifications and automatic triage | `watcher` |
 
-- Docs state what was **measured**, with the command that measures it. Verify against the
-  kernel or live state, never against a config file — a config file is a claim.
-- Superseded content is corrected in place with a dated note rather than deleted, so the
-  reasoning stays legible.
-- Anything under `archived/` describes a subsystem that **no longer exists**. Kept for history;
-  never treat as current.
+The originals are kept at `~/.docs-converted-2026-08-13/`.
 
 ---
 
-## Performance
+## What is still here, and why
 
-| Doc | Covers |
-|---|---|
-| [performance/CPU_PRIORITY.md](./performance/CPU_PRIORITY.md) | cgroup weights so dev work yields to the desktop; the `bgr` wrapper; why weights only compare siblings |
-| [performance/MEMORY_PRESSURE.md](./performance/MEMORY_PRESSURE.md) | `MemoryLow` protection vs `MemoryHigh` caps, the 2026-07 inversion, scoped `systemd-oomd`, the Claude reaper |
-| [performance/MEMORY_RECLAIM.md](./performance/MEMORY_RECLAIM.md) | Leaked processes that outlive their owner; measuring committed memory rather than RSS |
-| [performance/VIDEO_PLAYBACK.md](./performance/VIDEO_PLAYBACK.md) | Frame drops: Hyprland blur, VA-API decode, CPU contention; four ways the measurement lies |
-| [performance/CRASH_HISTORY.md](./performance/CRASH_HISTORY.md) | Running log of session losses — 2026-07-28 SIGKILL (**open**), 2026-07-23/24 OOM teardowns |
-| [performance/THERMAL_OPTIMIZATION.md](./performance/THERMAL_OPTIMIZATION.md) | Turbo/PL1 behaviour, `intel-undervolt`; why `cpufreq/boost` does not exist here |
+Nothing below describes the current machine, so none of it belongs in a skill —
+a skill that fires and describes a subsystem that no longer exists is worse than
+no skill at all.
 
-## Power & battery
-
-| Doc | Covers |
-|---|---|
-| [battery/S2IDLE_OPTIMIZATION.md](./battery/S2IDLE_OPTIMIZATION.md) | Suspend path and its service/script |
-| [battery/VRR_AND_SCX_SCHEDULER.md](./battery/VRR_AND_SCX_SCHEDULER.md) | `scx_lavd` scheduler; VRR is **disabled** (it hurt video frame pacing) |
-| [battery/SCREEN_OFF_MEDIA_AWARE.md](./battery/SCREEN_OFF_MEDIA_AWARE.md) | Media-aware screen blanking |
-| [power/BATTERY_DETECTION.md](./power/BATTERY_DETECTION.md) · [power/WORKSPACE_SNAPSHOT.md](./power/WORKSPACE_SNAPSHOT.md) | AC/battery detection; workspace snapshotting |
-
-## Hardware
-
-| Doc | Covers |
-|---|---|
-| [audio/SPEAKER_FIX.md](./audio/SPEAKER_FIX.md) | MAX98390 amps: ACPI creates one of four, DKMS module binds the rest over I2C |
-| [TOUCHSCREEN_UDEV.md](./TOUCHSCREEN_UDEV.md) | Suppressing the GXTP7936 touchscreen from libinput |
-| [boot/LIMINE.md](./boot/LIMINE.md) | Bootloader (Limine, **not** GRUB) |
-
-## Desktop & session
-
-| Doc | Covers |
-|---|---|
-| [ui/UWSM_SESSION.md](./ui/UWSM_SESSION.md) | How the Hyprland session is started and what owns which cgroup |
-| [ui/THEME_SYNC.md](./ui/THEME_SYNC.md) | Noctalia → GTK/kitty/polkit theme propagation |
-| [auth/POLKIT_AGENT.md](./auth/POLKIT_AGENT.md) | Polkit agent selection and theming |
-| [sddm/HIDPI.md](./sddm/HIDPI.md) | Display-manager scaling |
-
-## Browsers
-
-| Doc | Covers |
-|---|---|
-| [misc/ZEN_OPTIMISATIONS.md](./misc/ZEN_OPTIMISATIONS.md) | Zen RAM growth, upstream leak tracking, hardware-decode flag |
-| [misc/HELIUM_OPTIMISATIONS.md](./misc/HELIUM_OPTIMISATIONS.md) | The Chromium evaluation that preceded returning to Zen — historical, not current |
-
-## Monitoring
-
-| Doc | Covers |
-|---|---|
-| [monitoring/WARDEN.md](./monitoring/WARDEN.md) | Journal watcher → notification → headless triage session; the three mechanisms that keep it quiet; `session_args` as the authority switch |
-
-## Packages & sync
-
-| Doc | Covers |
-|---|---|
-| [packages/PACKAGE_TRACKING.md](./packages/PACKAGE_TRACKING.md) | Package list tracking across hosts |
-| [packages/PACDIM.md](./packages/PACDIM.md) | The pacman/yay output recolouring filter |
-| [SESSION-PACKAGE-PROFILES.md](./SESSION-PACKAGE-PROFILES.md) | Per-session package profiles |
-| [sync/CLAUDE-SESSIONS-SYNC.md](./sync/CLAUDE-SESSIONS-SYNC.md) | Claude session sync to the server |
-| [SYSTEM_SYMLINKS.md](./SYSTEM_SYMLINKS.md) | Every symlink from this repo into system paths |
-
----
-
-## Archived
-
-Subsystems that no longer exist. Each carries a banner explaining what replaced it.
-
-- `archived/taildrop-obsidian/` — Taildrop→Obsidian sync; scripts and vault path both gone
-- `archived/hibernation/` — hibernation setup, superseded by s2idle
-- `archived/gdm/` — GDM lock screen, superseded by SDDM
-- `archived/swayfx+waybar/` — the pre-Hyprland desktop
-
----
-
-## Auditing this tree
-
-Catches the two most common forms of rot:
-
-```sh
-cd ~/.config/.docs
-
-# 1. referenced paths that no longer exist (expect a few intentional absences —
-#    THERMAL_OPTIMIZATION.md documents paths precisely because they are missing)
-for f in $(find . -name '*.md' -not -path './archived/*'); do
-  grep -oE '`(~|/)[A-Za-z0-9~._/@-]+`' "$f" | tr -d '`' | sort -u | while read p; do
-    e="${p/#\~/$HOME}"; [ -e "$e" ] || echo "$f -> $p"
-  done
-done
-
-# 2. broken cross-references between docs
-for f in $(find . -name '*.md' -not -path './archived/*'); do
-  d=$(dirname "$f")
-  grep -oE '\]\(\.{1,2}/[A-Za-z0-9._/-]+\.md\)' "$f" | sed 's/](//;s/)//' | sort -u |
-    while read l; do [ -e "$d/$l" ] || echo "$f -> $l"; done
-done
-```
+- `archived/` — subsystems that have been removed. `taildrop-obsidian/` (sync
+  scripts and vault path both gone), `hibernation/` (superseded by s2idle),
+  `gdm/` (superseded by SDDM), `swayfx+waybar/` (the pre-Hyprland desktop, plus
+  its package list). Kept for history; never treat as current.
+- `misc/HELIUM_OPTIMISATIONS.md` — the Chromium evaluation that preceded
+  returning to Zen. Historical: Helium is not the daily browser.
+- `SESSION-PACKAGE-PROFILES.md` — an open research note on activating
+  per-compositor package sets without uninstalling, unresolved and with its
+  conclusion still untested. It also references a `NIRI-MIGRATION.md` that does
+  not exist.

@@ -50,6 +50,7 @@
 !/systemd/
 !/tmux/
 !/uwsm/
+!/udev/
 !/xdg-desktop-portal/
 !/xsettingsd/
 

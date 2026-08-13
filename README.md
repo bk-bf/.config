@@ -72,7 +72,7 @@ auto-restart — it survives crashes and is bound to the graphical session lifec
 Qt apps inherit GTK colors automatically via `QT_QPA_PLATFORMTHEME=gtk3` — no separate
 Qt theming needed.
 
-See `documentation/UI/THEME_SYNC.md` for full implementation details.
+The token mapping, the watcher and the generated files are documented in the `noctalia` Claude Code skill (`~/.claude/skills/noctalia/`).
 
 ### Appearance
 - **Corner Radius**: 20px rounded corners
@@ -90,7 +90,6 @@ See `documentation/UI/THEME_SYNC.md` for full implementation details.
 - **hypridle** handles idle detection and triggers the lock screen before suspend
 - Closing the laptop lid triggers **suspend-then-hibernate**: suspends to RAM immediately, auto-hibernates to disk after 45 min
 - **Battery at 5%**: UPower triggers hibernate — full session preserved even if battery dies while lid is closed
-- See [documentation/power/HIBERNATION.md](documentation/power/HIBERNATION.md) for full setup details
 - Display turns off after 4 minutes of inactivity
 
 ## Installation
@@ -103,8 +102,8 @@ bash ~/.config/install.sh
 `install.sh` installs all packages from `pkglist.txt` via `yay`, creates system symlinks,
 enables user services, and detects hardware automatically (CPU/GPU/HiDPI/laptop).
 On machines that aren't the Galaxy Book it skips hardware-specific tuning and prints what
-to review manually. See [documentation/SYSTEM_SYMLINKS.md](documentation/SYSTEM_SYMLINKS.md)
-for the full symlink map.
+to review manually. The full symlink map is in the `dotfiles` Claude Code skill
+(`~/.claude/skills/dotfiles/`).
 
 > Requires `yay` (or `paru`) to be installed first. The script will print bootstrap
 > instructions if neither is found.
@@ -173,7 +172,7 @@ ttf-meslo-nerd            # MesloLGL Nerd Font
 cantarell-fonts           # GNOME default font
 ```
 
-See [documentation/packages/PACKAGE_TRACKING.md](documentation/packages/PACKAGE_TRACKING.md) for details.
+Package tracking is documented in the `dotfiles` Claude Code skill.
 
 </details>
 
@@ -236,14 +235,9 @@ See [documentation/packages/PACKAGE_TRACKING.md](documentation/packages/PACKAGE_
 │   └── plugins/               # Installed plugins
 ├── xdg-desktop-portal/
 │   └── hyprland-portals.conf  # Routes FileChooser → gnome (Nautilus picker)
-└── documentation/
-    ├── UI/
-    │   ├── THEME_SYNC.md      # Theme pipeline full reference
-    │   └── UWSM_SESSION.md    # UWSM dependency, failure detection, troubleshooting
-    ├── power/
-    │   └── HIBERNATION.md     # Hibernate setup: swapfile, GRUB resume params, UPower, logind
-    └── auth/
-        └── POLKIT_AGENT.md    # Polkit agent setup and pam_faillock notes
+├── udev/
+│   └── 99-disable-touchscreen.rules   # Copied to /etc/udev/rules.d/
+└── .docs/                     # Archived history only — current docs are Claude Code skills
 ```
 
 ## Customization
