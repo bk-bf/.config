@@ -122,9 +122,7 @@ burst_ok() {
   echo "$now" >> "$f"; return 0
 }
 
-# Per-(rule,subject) cooldown with escalating backoff + coalescing.
-# Prints " (+N more)" suffix on a fire that had suppressed repeats. Returns 0 to notify.
-should_# Append one toast to the feed claude-status mirrors to the dashboard.
+# Append one toast to the feed claude-status mirrors to the dashboard.
 NOTIFY_LOG="${HOME}/.local/state/claude-status/notifications.jsonl"
 notify_log() {
   mkdir -p "$(dirname "$NOTIFY_LOG")" 2>/dev/null || return 0
@@ -137,7 +135,9 @@ print(json.dumps({"app": "system", "rule": rule, "summary": summary,
 PY
 }
 
-notify() {
+# Per-(rule,subject) cooldown with escalating backoff + coalescing.
+# Prints " (+N more)" suffix on a fire that had suppressed repeats. Returns 0 to notify.
+should_notify() {
   local key="$1" base="$2" now last count strikes f eff
   now=$(date +%s); f="$STATE_DIR/$(sanitize "$key")"
   last=0; count=0; strikes=0
