@@ -65,7 +65,17 @@ name = "memory-universal"
 # notes (this laptop's RAM, the server's docker stack) are deliberately excluded
 # upstream by claude-memory-sync, because a fact that is true here and false
 # there is worse than a missing one. Two-way, so another device can add to it.
-local = "/home/kirill/.claude/memory-universal"
+# NOT ~/.claude/memory-universal any more. That directory is REGENERATED
+# DESTRUCTIVELY by claude-memory-sync export_universal(): it rebuilds the set from
+# this laptop's ~/.claude/projects/*/memory only, and unlinks anything else. Server-
+# authored memories arrived here by osync, were unlinked on the next 5-min run, and
+# osync then propagated that unlink back as an initiator deletion — which is what was
+# silently eating memories written on ubuntuserver. A destructively derived directory
+# cannot be a bidirectional sync endpoint. ~/memory-universal is the real shared set
+# (same path as the server); memory-universal-feed.timer copies laptop-authored notes
+# into it additively, never deleting. See ~/.local/bin/memory-universal-feed and
+# ~/.local/bin/memory-universal-reconcile, which carry the full reasoning.
+local = "/home/kirill/memory-universal"
 remote = "/home/ubuntu/memory-universal"
 direction = "sync"
 mode = "ts"
