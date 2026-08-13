@@ -7,4 +7,4 @@ Wants=network-online.target
 Type=oneshot
 Slice=background.slice
 Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin
-ExecStart=/home/kirill/.local/bin/memory-universal-reconcile
+ExecStart=%h/.config/bin/memory-universal-reconcile

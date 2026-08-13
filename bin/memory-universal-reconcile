@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Periodic REAL osync pass for memory-universal, to apply pending deletions.
+#
+# Why this exists: osd --guarded-sync (what the 5-min timer runs) pre-checks with
+# `osync --dry --summary`, and osync's dry mode reports "0 deletions" even when a
+# real run would delete. Verified 2026-08-12:
+#     --dry --summary : Initiator has 0 deletions
+#     real run        : Initiator has 1 deletions  + DELETE << canary2-server.md
+# So osd prints "already in sync — nothing to do" and skips any cycle whose only
+# pending change is a deletion — deletions then never propagate on the schedule.
+# Updates are unaffected (they are counted correctly), so the 5-min osd timer still
+# handles all propagation of NEW notes; this slower pass only settles deletions.
+#
+# Guard: osd's own delete_guard is bypassed by calling osync directly, so a
+# deliberately blunt one is reimplemented here — refuse if the two sides differ by
+# more than GUARD files. That is the catastrophic case this whole fix is about
+# (one machine's copy empty or truncated), not a normal one- or two-file deletion.
+# SOFT_DELETE=true and the 15-min git snapshot remain the recovery net.
+set -euo pipefail
+GUARD=25
+CONF="$HOME/.cache/osync/generated/memory-universal.conf"
+LOCAL_DIR="$HOME/memory-universal"
+[ -f "$CONF" ] || { echo "reconcile: no config yet — run osd once first" >&2; exit 0; }
+
+count_local() { find "$LOCAL_DIR" -maxdepth 1 -name "*.md" -type f | wc -l; }
+ln_=$(count_local)
+rn=$(ssh -o BatchMode=yes -o ConnectTimeout=15 ubuntu \
+      "find /home/ubuntu/memory-universal -maxdepth 1 -name '*.md' -type f | wc -l" 2>/dev/null) || {
+  echo "reconcile: target unreachable — skipping" >&2; exit 0; }
+
+case "$rn" in ""|*[!0-9]*) echo "reconcile: remote count not a number (got: '$rn') — skipping" >&2; exit 0;; esac
+diff_n=$(( ln_ > rn ? ln_ - rn : rn - ln_ ))
+if [ "$diff_n" -gt "$GUARD" ]; then
+  echo "reconcile: REFUSING — laptop has $ln_ notes, server has $rn ($diff_n apart, guard $GUARD)." >&2
+  echo "reconcile: that is the mass-loss shape. Inspect both sides before syncing." >&2
+  exit 3
+fi
+exec /usr/local/bin/osync.sh "$CONF" --summary --no-prefix

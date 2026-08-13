@@ -3,4 +3,4 @@ Description=Sync the local noctalia fork with upstream (rebasing local mods on t
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/noctalia-sync
+ExecStart=%h/.config/bin/noctalia-sync

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# noctalia-sync — keep the local noctalia fork current with its upstream branch
+# while preserving local mods. Rebases the `local` branch (= upstream ref + mods)
+# onto the latest upstream tip. Clean rebase → notify (reload to apply). Conflict
+# → a headless Claude resolves it, keeping BOTH upstream and the mod intent, then
+# continues the rebase. Git-only on quiet days; Claude only when a conflict occurs.
+#
+# NOTE: this fork tracks the QML *v4* shell on branch `legacy-v4`, which is EOL —
+# noctalia's active development moved to a native rewrite on `main` (a different
+# codebase these QML mods/plugins do NOT apply to). So updates here are rare by
+# design; the sync just keeps us on the exact v4 tip. Override the tracked ref
+# with NOCTALIA_UPSTREAM_REF if that ever changes.
+set -uo pipefail
+
+REPO="$HOME/Documents/local/Projects/noctalia"
+UPREF="${NOCTALIA_UPSTREAM_REF:-upstream/legacy-v4}"
+cd "$REPO" 2>/dev/null || { echo "noctalia-sync: no clone at $REPO" >&2; exit 1; }
+notify() { notify-send -a noctalia-sync "$1" "${2:-}" 2>/dev/null || true; }
+CLD="${CLD:-$HOME/.local/bin/claude}"; [ -x "$CLD" ] || CLD="claude"
+log="$HOME/.cache/noctalia-sync.log"; mkdir -p "$(dirname "$log")"
+
+git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -qx local || git checkout -q local 2>/dev/null \
+  || { notify "noctalia-sync" "no 'local' branch"; exit 1; }
+git fetch -q upstream 2>/dev/null || { echo "fetch failed" >>"$log"; exit 1; }
+
+# nothing new upstream?
+if git merge-base --is-ancestor "$UPREF" HEAD 2>/dev/null; then
+  exit 0
+fi
+
+# safety: `local` must be a small mods-on-top-of-upstream branch. If it carries
+# many commits over the upstream ref (e.g. a diverged/wrong base), a rebase would
+# be destructive — refuse and let the user re-base the fork deliberately.
+mods="$(git rev-list --count "$UPREF"..local 2>/dev/null || echo 999)"
+if [ "${mods:-999}" -gt 10 ]; then
+  notify "noctalia-sync" "fork carries $mods commits over $UPREF — not a clean mods-on-top base; skipping (rebase would be destructive)."
+  exit 1
+fi
+n="$(git rev-list --count HEAD.."$UPREF" 2>/dev/null || echo '?')"
+echo "=== $(date -Is)  rebasing $n commit(s) from $UPREF ===" >>"$log"
+
+if git rebase "$UPREF" >>"$log" 2>&1; then
+  git push -qf origin local 2>/dev/null || true
+  notify "noctalia updated" "$n commit(s) from $UPREF merged, your mods kept — reload noctalia to apply"
+  exit 0
+fi
+
+# conflict → resolve with Claude, preserving both upstream and the mods
+notify "noctalia-sync" "upstream conflict — Claude is resolving…"
+PROMPT='You are finishing a git rebase in this repository (a fork of the noctalia Quickshell shell) that stopped on a conflict. Resolve EVERY conflict by keeping the upstream changes AND re-applying my local modifications — chiefly a copy-to-clipboard NIconButton next to the dismiss button in Modules/Notification/Notification.qml and next to the delete button in Modules/Panels/NotificationHistory/NotificationHistoryPanel.qml (plus any other local mods you find in the conflict). For each conflicted file, merge both intents, `git add` it, then `git rebase --continue`. Repeat until the rebase is fully complete. NEVER drop my mods. Do not push and do not run unrelated commands.'
+if "$CLD" -p "$PROMPT" --dangerously-skip-permissions >>"$log" 2>&1 && ! git rebase --show-current-patch >/dev/null 2>&1; then
+  git push -qf origin local 2>/dev/null || true
+  notify "noctalia synced" "$n commit(s), conflicts resolved by Claude — reload to apply"
+  exit 0
+else
+  git rebase --abort 2>/dev/null || true
+  notify "noctalia-sync failed" "conflict unresolved — kept your current version (see ~/.cache/noctalia-sync.log)"
+  exit 1
+fi
