@@ -1,0 +1,31 @@
+#!/bin/sh
+# Recreate the SONAME symlinks Catapult's extractor drops from CDDA/TLG
+# release tarballs. Without them the game dies at ld.so and the launcher
+# just sits there.
+
+root=${CATAPULT_ROOT:-/opt/catapult-bin}
+linked=0
+
+for lib in "$root"/*/game*/lib; do
+	[ -d "$lib" ] || continue
+
+	for path in "$lib"/*.so.*; do
+		[ -f "$path" ] || continue
+		if [ -L "$path" ]; then
+			continue
+		fi
+
+		file=${path##*/}
+		soname=$(objdump -p "$path" 2>/dev/null | awk '/SONAME/{print $2; exit}')
+
+		[ -n "$soname" ] || continue
+		[ "$soname" != "$file" ] || continue
+		[ -e "$lib/$soname" ] && continue
+
+		ln -sfn "$file" "$lib/$soname" || exit 1
+		printf '%s/%s -> %s\n' "$lib" "$soname" "$file"
+		linked=$((linked + 1))
+	done
+done
+
+printf 'linked %d\n' "$linked"
