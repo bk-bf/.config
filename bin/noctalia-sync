@@ -21,7 +21,15 @@ log="$HOME/.cache/noctalia-sync.log"; mkdir -p "$(dirname "$log")"
 
 git rev-parse --abbrev-ref HEAD 2>/dev/null | grep -qx local || git checkout -q local 2>/dev/null \
   || { notify "noctalia-sync" "no 'local' branch"; exit 1; }
-git fetch -q upstream 2>/dev/null || { echo "fetch failed" >>"$log"; exit 1; }
+# The timer is Persistent=true, so a run slept through fires as a catch-up the
+# moment the user manager resumes — seconds after suspend exit, before WiFi has
+# associated. A down link is not a sync failure, so retry before giving up.
+fetch_ok=0
+for _ in 1 2 3 4 5; do
+  git fetch -q upstream 2>/dev/null && { fetch_ok=1; break; }
+  sleep 30
+done
+[ "$fetch_ok" = 1 ] || { echo "$(date -Is) fetch failed after 5 attempts" >>"$log"; exit 1; }
 
 # nothing new upstream?
 if git merge-base --is-ancestor "$UPREF" HEAD 2>/dev/null; then
