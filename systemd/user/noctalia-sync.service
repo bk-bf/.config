@@ -1,5 +1,7 @@
 [Unit]
 Description=Sync the local noctalia fork with upstream (rebasing local mods on top)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
