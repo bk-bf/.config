@@ -1,6 +1,7 @@
 [Unit]
 Description=Copy the Claude skills to the machines that run background sessions
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot

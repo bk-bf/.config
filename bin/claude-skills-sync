@@ -34,10 +34,28 @@ done
 [ ${#skills[@]} -gt 0 ] || { echo "no skills in $SRC" >&2; exit 0; }
 [ ${#owned[@]} -eq 0 ] || echo "repo-owned, installed by their own project: ${owned[*]}"
 
-for host in "${HOSTS[@]}"; do
+# The link to the server is a WiFi-repeater backhaul that drops for seconds at a
+# time, and a Persistent=true timer also fires catch-up runs the moment the user
+# manager resumes, before WiFi has associated. Either way a 10s connect timeout
+# ends the run with rsync 255. One blip is not a sync failure, so retry the host.
+# The retry wraps the whole host pass rather than each skill: rsync is idempotent
+# and skills already in sync cost a stat, so redoing all 21 is cheap, whereas
+# retrying per skill would flail three times over for each of them and leave the
+# unit hanging for half an hour against a host that is genuinely down.
+sync_host() {
+  local host="$1" s
   for s in "${skills[@]}"; do
     rsync -aL --delete -e 'ssh -o BatchMode=yes -o ConnectTimeout=10' \
-      "$SRC/$s/" "$host:.claude/skills/$s/"
+      "$SRC/$s/" "$host:.claude/skills/$s/" || return 1
   done
+}
+
+for host in "${HOSTS[@]}"; do
+  host_ok=0
+  for attempt in 1 2 3; do
+    sync_host "$host" && { host_ok=1; break; }
+    [ "$attempt" = 3 ] || { echo "$host unreachable, retrying in 30s" >&2; sleep 30; }
+  done
+  [ "$host_ok" = 1 ] || { echo "skills sync to $host failed after 3 attempts" >&2; exit 1; }
   echo "skills synced to $host (${#skills[@]}): ${skills[*]}"
 done
