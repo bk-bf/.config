@@ -4,7 +4,7 @@
 # custom default aliases
 alias cl="clear"
 alias c="calc"
-alias off="shutdown -h now"
+alias off="sudo systemctl suspend"
 _td_alert() {
     notify-send -u normal "Timer Complete" "Countdown finished!" 
     mpv --no-terminal /usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga
