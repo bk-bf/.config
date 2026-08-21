@@ -1,0 +1,27 @@
+{
+  "id": "dashboard-usage",
+  "name": "Dashboard",
+  "version": "0.1.0",
+  "author": "bk-bf",
+  "description": "AI coding spend from your dashboard server: live 5-hour burn rate, plan limits and per-machine collector health, in the Noctalia bar.",
+  "repository": "https://github.com/bk-bf/dashboard",
+  "entryPoints": {
+    "main": "Main.qml",
+    "barWidget": "BarWidget.qml",
+    "panel": "Panel.qml",
+    "settings": "Settings.qml"
+  },
+  "metadata": {
+    "displayMode": "alwaysShow",
+    "iconColor": "none",
+    "textColor": "none",
+    "defaultSettings": {
+      "baseUrl": "http://ubuntuserver:8443",
+      "intervalMs": 30000,
+      "barMetric": "auto",
+      "warnPct": 75,
+      "critPct": 90,
+      "colorBySeverity": true
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "id": "git-status",
+  "name": "Git Status",
+  "version": "0.1.0",
+  "author": "bk-bf",
+  "description": "System-wide git status in the bar: which repos have uncommitted, unpushed or unpulled changes, with one-click pull / push and open-to-commit.",
+  "entryPoints": {
+    "main": "Main.qml",
+    "barWidget": "BarWidget.qml",
+    "panel": "Panel.qml",
+    "settings": "Settings.qml"
+  },
+  "metadata": {
+    "displayMode": "alwaysShow",
+    "iconColor": "none",
+    "textColor": "none",
+    "cpuIntensive": false,
+    "defaultSettings": {
+      "binPath": "~/.local/bin/git-status",
+      "intervalMs": 60000,
+      "terminalCmd": "kitty"
+    }
+  }
+}

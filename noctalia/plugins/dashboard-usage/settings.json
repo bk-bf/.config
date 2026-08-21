@@ -1,0 +1,8 @@
+{
+  "baseUrl": "http://100.122.63.6:8443",
+  "intervalMs": 30000,
+  "barMetric": "auto",
+  "warnPct": 75,
+  "critPct": 90,
+  "colorBySeverity": true
+}

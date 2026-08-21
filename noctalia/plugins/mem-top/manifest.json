@@ -1,0 +1,45 @@
+{
+  "id": "mem-top",
+  "name": "System Monitor+",
+  "version": "0.2.0",
+  "author": "bk-bf",
+  "description": "Noctalia's system monitor, plus a click-through breakdown of what is actually holding memory: applications, systemd services, and each Claude Code session under its own session name. Ranks committed memory (RSS + swap), so processes compressed into zram are not invisible. Replaces the built-in System Monitor widget rather than sitting next to it.",
+  "entryPoints": {
+    "main": "Main.qml",
+    "barWidget": "BarWidget.qml",
+    "panel": "Panel.qml",
+    "settings": "Settings.qml"
+  },
+  "metadata": {
+    "displayMode": "alwaysShow",
+    "iconColor": "none",
+    "textColor": "none",
+    "cpuIntensive": false,
+
+    "compactMode": false,
+    "useMonospaceFont": false,
+    "usePadding": false,
+    "diskPath": "/",
+    "showCpuUsage": true,
+    "showCpuCores": false,
+    "showCpuFreq": false,
+    "showCpuTemp": true,
+    "showGpuTemp": false,
+    "showMemoryUsage": true,
+    "showMemoryAsPercent": true,
+    "showSwapUsage": false,
+    "showNetworkStats": false,
+    "showDiskUsage": false,
+    "showDiskUsageAsPercent": false,
+    "showDiskAvailable": false,
+    "showLoadAverage": false,
+
+    "defaultSettings": {
+      "binPath": "~/.local/bin/mem-top",
+      "intervalMs": 10000,
+      "limit": 14,
+      "warnPct": 75,
+      "critPct": 88
+    }
+  }
+}

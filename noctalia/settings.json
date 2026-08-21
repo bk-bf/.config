@@ -37,8 +37,7 @@
         "viewMode": "list"
     },
     "audio": {
-        "mprisBlacklist": [
-        ],
+        "mprisBlacklist": [],
         "preferredPlayer": "",
         "spectrumFrameRate": 30,
         "spectrumMirrored": true,
@@ -68,8 +67,7 @@
         "middleClickAction": "none",
         "middleClickCommand": "",
         "middleClickFollowMouse": false,
-        "monitors": [
-        ],
+        "monitors": [],
         "mouseWheelAction": "none",
         "mouseWheelWrap": true,
         "outerCorners": true,
@@ -78,8 +76,7 @@
         "rightClickAction": "controlCenter",
         "rightClickCommand": "",
         "rightClickFollowMouse": true,
-        "screenOverrides": [
-        ],
+        "screenOverrides": [],
         "showCapsule": false,
         "showOnWorkspaceSwitch": true,
         "showOutline": false,
@@ -89,9 +86,18 @@
             "center": [
                 {
                     "compactMode": false,
+                    "cpuIntensive": false,
+                    "defaultSettings": {
+                        "binPath": "~/.local/bin/mem-top",
+                        "critPct": 88,
+                        "intervalMs": 10000,
+                        "limit": 14,
+                        "warnPct": 75
+                    },
                     "diskPath": "/",
+                    "displayMode": "alwaysShow",
                     "iconColor": "none",
-                    "id": "SystemMonitor",
+                    "id": "plugin:mem-top",
                     "showCpuCores": false,
                     "showCpuFreq": false,
                     "showCpuTemp": true,
@@ -106,7 +112,7 @@
                     "showNetworkStats": false,
                     "showSwapUsage": false,
                     "textColor": "none",
-                    "useMonospaceFont": true,
+                    "useMonospaceFont": false,
                     "usePadding": false
                 }
             ],
@@ -142,6 +148,21 @@
                     "useCustomFont": false
                 },
                 {
+                    "cpuIntensive": false,
+                    "defaultSettings": {
+                        "barMetric": "auto",
+                        "binPath": "~/.local/bin/osd",
+                        "colorByHealth": true,
+                        "intervalMs": 20000,
+                        "localOnly": false,
+                        "terminalCmd": "kitty"
+                    },
+                    "displayMode": "alwaysShow",
+                    "iconColor": "none",
+                    "id": "plugin:osd",
+                    "textColor": "none"
+                },
+                {
                     "colorizeIcons": false,
                     "hideMode": "hidden",
                     "id": "ActiveWindow",
@@ -154,6 +175,46 @@
                 }
             ],
             "right": [
+                {
+                    "cpuIntensive": false,
+                    "defaultSettings": {
+                        "binPath": "~/.local/bin/claude-status",
+                        "hideWhenIdle": false,
+                        "idleWarnSec": 300,
+                        "intervalMs": 15000,
+                        "terminalCmd": "kitty"
+                    },
+                    "displayMode": "alwaysShow",
+                    "iconColor": "none",
+                    "id": "plugin:claude-status",
+                    "textColor": "none"
+                },
+                {
+                    "cpuIntensive": false,
+                    "defaultSettings": {
+                        "binPath": "~/.local/bin/git-status",
+                        "intervalMs": 60000,
+                        "terminalCmd": "kitty"
+                    },
+                    "displayMode": "alwaysShow",
+                    "iconColor": "none",
+                    "id": "plugin:git-status",
+                    "textColor": "none"
+                },
+                {
+                    "defaultSettings": {
+                        "barMetric": "auto",
+                        "baseUrl": "http://100.122.63.6:8443",
+                        "colorBySeverity": true,
+                        "critPct": 90,
+                        "intervalMs": 30000,
+                        "warnPct": 75
+                    },
+                    "displayMode": "alwaysShow",
+                    "iconColor": "none",
+                    "id": "plugin:dashboard-usage",
+                    "textColor": "none"
+                },
                 {
                     "deviceNativePath": "__default__",
                     "displayMode": "icon-always",
@@ -226,8 +287,7 @@
         }
     },
     "brightness": {
-        "backlightDeviceMappings": [
-        ],
+        "backlightDeviceMappings": [],
         "brightnessStep": 2,
         "enableDdcSupport": false,
         "enforceMinimum": true
@@ -323,8 +383,7 @@
         "enabled": false,
         "gridSnap": false,
         "gridSnapScale": false,
-        "monitorWidgets": [
-        ],
+        "monitorWidgets": [],
         "overviewEnabled": true
     },
     "dock": {
@@ -348,11 +407,9 @@
         "launcherIconColor": "none",
         "launcherPosition": "end",
         "launcherUseDistroLogo": false,
-        "monitors": [
-        ],
+        "monitors": [],
         "onlySameOutput": true,
-        "pinnedApps": [
-        ],
+        "pinnedApps": [],
         "pinnedStatic": false,
         "position": "bottom",
         "showDockIndicator": false,
@@ -407,8 +464,7 @@
         "lockScreenAnimations": true,
         "lockScreenBlur": 0,
         "lockScreenCountdownDuration": 10000,
-        "lockScreenMonitors": [
-        ],
+        "lockScreenMonitors": [],
         "lockScreenTint": 0,
         "passwordChars": false,
         "radiusRatio": 1,
@@ -502,8 +558,7 @@
         "enabled": true,
         "location": "top_right",
         "lowUrgencyDuration": 1,
-        "monitors": [
-        ],
+        "monitors": [],
         "normalUrgencyDuration": 3,
         "overlayLayer": true,
         "respectExpireTimeout": false,
@@ -532,8 +587,7 @@
             2
         ],
         "location": "top_right",
-        "monitors": [
-        ],
+        "monitors": [],
         "overlayLayer": true
     },
     "plugins": {
@@ -632,8 +686,7 @@
         "warningColor": ""
     },
     "templates": {
-        "activeTemplates": [
-        ],
+        "activeTemplates": [],
         "enableUserTheming": false
     },
     "ui": {
@@ -655,14 +708,12 @@
         "directory": "/home/kirill/Pictures/Wallpaper",
         "enableMultiMonitorDirectories": false,
         "enabled": true,
-        "favorites": [
-        ],
+        "favorites": [],
         "fillColor": "#000000",
         "fillMode": "crop",
         "hideWallpaperFilenames": false,
         "linkLightAndDarkWallpapers": true,
-        "monitorDirectories": [
-        ],
+        "monitorDirectories": [],
         "overviewBlur": 0.4,
         "overviewEnabled": false,
         "overviewTint": 0.6,
