@@ -8,4 +8,4 @@ Target = *
 [Action]
 Description = Updating package list...
 When = PostTransaction
-Exec = /usr/bin/su kirill -c "/home/kirill/.config/pkg-tracker.sh"
+Exec = /usr/bin/su kirill -c "/home/kirill/.config/bin/pkg-tracker.sh"

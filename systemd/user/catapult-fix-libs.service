@@ -1,0 +1,6 @@
+[Unit]
+Description=Repair Catapult CDDA bundled-library symlinks
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/catapult-fix-libs

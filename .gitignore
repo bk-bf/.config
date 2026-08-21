@@ -161,6 +161,8 @@ Code/User/sync/
 Code/User/chatLanguageModels.json
 Code/Cookies
 Code/Cookies-journal
+Code/agent-host/
+Code/agentSessionData/
 
 # Machine-specific / auto-generated state — never public
 cachyos-hello.json
@@ -289,3 +291,13 @@ osync/*.bak-*
 /systemd/user/claude-memory-sync.timer
 /systemd/user/codegraph.service
 /systemd/user/codegraph.service.d/
+#   upscale    ./install.sh (writes the units pointing at ~/.local/bin/upscale)
+/systemd/user/upscale.service
+/systemd/user/upscale.service.d/
+/systemd/user/upscale-*.service
+/systemd/user/upscale-*.timer
+
+# Plugin directories that are symlinks into a project checkout. The project's
+# own noctalia-plugin/install.sh makes the link, and following it into git would
+# commit that repo's working copy into this one.
+/noctalia/plugins/osd

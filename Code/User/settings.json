@@ -221,8 +221,6 @@
   "claudeCode.initialPermissionMode": "bypassPermissions",
   "claudeCode.allowDangerouslySkipPermissions": true,
   "opencodego.commitIncludeCommitDiff": true,
-  "gitlens.ai.model": "vscode",
-  "gitlens.ai.vscode.model": "copilot:claude-fable-5",
   "chat.titleBar.openInAgentsWindow.enabled": false,
   "chat.unifiedAgentsBar.enabled": true,
   "workbench.browser.showInTitleBar": true,

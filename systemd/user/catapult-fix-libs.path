@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch Catapult CDDA install for re-extraction and repair lib symlinks
+
+[Path]
+# Fires whenever Catapult writes into the game's lib dir (e.g. on update),
+# and re-arms if the dir is deleted/recreated during a fresh install.
+PathModified=/opt/catapult-bin/dda/game0/lib
+PathChanged=/opt/catapult-bin/dda/game0/lib
+
+[Install]
+WantedBy=default.target
