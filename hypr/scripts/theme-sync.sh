@@ -156,5 +156,5 @@ echo "[theme-sync] Restarted polkit agent"
 # Update this if switching to a scheme with a different dominant hue.
 gsettings set org.gnome.desktop.interface accent-color 'purple' 2>/dev/null || true
 
-notify-send -i preferences-desktop-color "Theme Sync" "System theme synced to $mPrimary" -t 3000
+notify-send -u low -i preferences-desktop-color "Theme Sync" "System theme synced to $mPrimary"
 echo "[theme-sync] Done — synced from Noctalia ($mPrimary)"
