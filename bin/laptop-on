@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# laptop-on — wake the laptop, wait until it is actually usable, mosh in.
+#
+# Counterpart of the laptop's desktop-on. The magic packet is broadcast from
+# ubuntuserver because it is the only always-on machine on the laptop's L2
+# segment (192.168.178.0/24). Tailscale cannot carry it: tailscaled is not
+# running on a suspended machine.
+#
+# The ssh to the server is one-shot and closes before the wait begins — the wait
+# runs from here, because what matters is that THIS machine can reach the
+# laptop, not that the server can.
+#
+# wake-laptop is called by absolute path: ~/.local/bin is NOT on the PATH of a
+# non-interactive ssh session, so the bare name resolves to nothing.
+#
+# The session runs under a systemd idle inhibitor. Without one, hypridle's
+# 1800s listener suspends the laptop again half an hour in, and ssh/mosh traffic
+# is invisible to hypridle — the session would die mid-use with the lid still
+# shut. A *sleep* inhibitor would say that directly, but logind gates
+# inhibit-block-sleep behind polkit and a remote session has no seat, so it is
+# refused; blocking *idle* is allowed unauthenticated, and hypridle honours
+# logind's BlockInhibited, so its timers never fire. The inhibitor lives exactly
+# as long as the shell it wraps.
+set -uo pipefail
+
+HOST=${1:-laptop}
+TIMEOUT=${LAPTOP_ON_TIMEOUT:-120}
+
+printf "sending magic packet via ubuntu...\n"
+if ! ssh -o ConnectTimeout=10 ubuntu "~/.local/bin/wake-laptop"; then
+    printf "could not reach ubuntu to send the packet\n" >&2
+    exit 1
+fi
+
+printf "waiting for %s (up to %ss)" "$HOST" "$TIMEOUT"
+start=$SECONDS
+while (( SECONDS - start < TIMEOUT )); do
+    # ssh, not ping: this proves tailscaled and sshd are up, i.e. genuinely
+    # ready to take a session, not merely powered on.
+    if ssh -o ConnectTimeout=3 -o BatchMode=yes "$HOST" true 2>/dev/null; then
+        printf "\n%s awake and ready after %ss — connecting\n" "$HOST" "$((SECONDS - start))"
+        exec env LC_ALL=C.UTF-8 mosh "$HOST" -- \
+            systemd-inhibit --what=idle --mode=block \
+                --who=laptop-on --why=remote-session /usr/bin/zsh -l
+    fi
+    printf "."
+    sleep 3
+done
+
+printf "\n%s did not come up within %ss\n" "$HOST" "$TIMEOUT" >&2
+exit 1
