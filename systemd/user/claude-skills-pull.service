@@ -1,0 +1,9 @@
+[Unit]
+Description=Pull Claude Code skills from the hub (ubuntuserver)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Slice=background.slice
+ExecStart=%h/.config/bin/claude-skills-pull

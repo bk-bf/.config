@@ -1,0 +1,7 @@
+[Unit]
+Description=Rebuild the universal-memories index Claude imports
+
+[Service]
+Type=oneshot
+Slice=background.slice
+ExecStart=%h/.config/bin/universal-memories-index

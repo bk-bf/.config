@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Skills are per-machine, and this machine is a replica.
+#
+# The laptop authors them and pushes to ubuntuserver (bin/claude-skills-sync on
+# the hyprland-noctalia branch); the server also holds a few of its own (notify,
+# offload, upscale). The desktop takes the whole set from the server rather than
+# from the laptop, because the laptop is a laptop — asleep, closed, or off the
+# tailnet most of the day — while the server is always up and already carries
+# everything the laptop has.
+#
+# This is deliberately a PULL and not the laptop's push script. If the desktop
+# also pushed, its copy would go stale between runs and then overwrite a skill
+# the laptop had just edited, because the push applies --delete per directory.
+# One writer, one hub, and everything else reads: a skill written here has to be
+# promoted by hand, which is the right amount of friction for how rarely it
+# happens.
+#
+# Two rules carried over from the push side. --delete is applied per skill
+# directory, never to ~/.claude/skills itself, so a skill that exists only here
+# survives every run. And a skill that is a *symlink* belongs to a project repo
+# which installs it on each machine itself — writing through the link would
+# dirty that checkout, so those are skipped.
+set -euo pipefail
+
+HOST=ubuntu
+DST="$HOME/.claude/skills"
+SSH_OPTS='ssh -o BatchMode=yes -o ConnectTimeout=10'
+
+mkdir -p "$DST"
+
+list_remote() {
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" \
+    'cd ~/.claude/skills 2>/dev/null && for d in */; do [ -d "$d" ] && echo "${d%/}"; done'
+}
+
+pull_all() {
+  local s
+  for s in "${skills[@]}"; do
+    if [ -L "$DST/$s" ]; then
+      owned+=("$s"); continue
+    fi
+    rsync -aL --delete -e "$SSH_OPTS" "$HOST:.claude/skills/$s/" "$DST/$s/" || return 1
+  done
+}
+
+# The tailnet link drops for seconds at a time and a Persistent=true timer fires
+# its catch-up run the moment the user manager resumes, before the network is up.
+# Either way rsync exits 255 on the connect timeout. One blip is not a failure.
+ok=0
+for attempt in 1 2 3; do
+  if mapfile -t skills < <(list_remote) && [ ${#skills[@]} -gt 0 ]; then
+    owned=()
+    if pull_all; then ok=1; break; fi
+  fi
+  [ "$attempt" = 3 ] || { echo "$HOST unreachable, retrying in 30s" >&2; sleep 30; }
+done
+
+[ "$ok" = 1 ] || { echo "skills pull from $HOST failed after 3 attempts" >&2; exit 1; }
+[ ${#owned[@]} -eq 0 ] || echo "repo-owned, installed by their own project: ${owned[*]}"
+echo "skills pulled from $HOST (${#skills[@]}): ${skills[*]}"

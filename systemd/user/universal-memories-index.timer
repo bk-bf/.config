@@ -1,0 +1,15 @@
+# On the laptop this index is written by claude-memory-sync, which belongs to the
+# dashboard project and runs on its own 5-minute timer. That project is not
+# checked out here, so the index gets its own timer instead — same cadence, so
+# ~/.claude/universal-memories.md follows ~/memory-universal within one osd sync
+# cycle either way.
+[Unit]
+Description=Rebuild the universal-memories index every 5 minutes
+
+[Timer]
+OnStartupSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

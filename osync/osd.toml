@@ -1,0 +1,32 @@
+# osd compose — one file, many sync connections.
+# Managed by osd (a add · t endpoint · d direction), editable by hand.
+# Each [[connection]] is a two-way osync job between this machine and a host.
+
+[settings]
+notify = true
+notify_cmd = "notify-send"
+delete_guard = 25
+node = "cachyos-x8664-desktop"
+yeet_hub = "ubuntu"
+
+[defaults]
+user = ""
+key = "~/.ssh/id_rsa"
+soft_delete_days = 30
+conflict_backup_days = 30
+
+[[connection]]
+name = "memory-universal"
+local = "/home/kirill/memory-universal"
+remote = "/home/ubuntu/memory-universal"
+direction = "sync"
+mode = "ts"
+user = "ubuntu"
+key = "/home/kirill/.ssh/id_rsa"
+ts_host = "ubuntu"
+ts_port = 22
+ssh_host = ""
+ssh_port = 22
+exclude = ".osync-part;.DS_Store;*.tmp;*.swp;*.part"
+auto = "periodic"
+interval = "5m"

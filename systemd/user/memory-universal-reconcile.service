@@ -1,0 +1,10 @@
+[Unit]
+Description=memory-universal — real osync pass so deletions settle
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Slice=background.slice
+Environment=PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin
+ExecStart=%h/.config/bin/memory-universal-reconcile
