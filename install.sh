@@ -116,6 +116,16 @@ echo "==> Creating system symlinks..."
 sudo mkdir -p /etc/pacman.d/hooks
 sudo ln -sf "$CONFIG/pkg-tracker.hook" /etc/pacman.d/hooks/pkg-tracker.hook
 
+# ── Mirror refresh ────────────────────────────────────────────────────────────
+# cachyos-rate-mirrors.timer is Persistent=true, so a due date inside a suspend
+# window fires at wake, before NetworkManager reconnects. The drop-in waits for
+# connectivity so the script's geoip lookup has a resolver.
+
+sudo mkdir -p /etc/systemd/system/cachyos-rate-mirrors.service.d
+sudo ln -sf "$CONFIG/systemd/cachyos-rate-mirrors-wait-for-network.conf" \
+    /etc/systemd/system/cachyos-rate-mirrors.service.d/wait-for-network.conf
+echo "    cachyos-rate-mirrors → wait-for-network drop-in symlinked"
+
 # ── Limine ────────────────────────────────────────────────────────────────────
 # CachyOS Limine stack (replaces GRUB). limine-mkinitcpio-hook regenerates
 # $ESP/limine.conf on each kernel build; boot snapshots via limine-snapper-sync
