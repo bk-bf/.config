@@ -197,20 +197,6 @@
                 {
                     "cpuIntensive": false,
                     "defaultSettings": {
-                        "binPath": "~/.local/bin/claude-status",
-                        "hideWhenIdle": false,
-                        "idleWarnSec": 300,
-                        "intervalMs": 15000,
-                        "terminalCmd": "kitty"
-                    },
-                    "displayMode": "alwaysShow",
-                    "iconColor": "none",
-                    "id": "plugin:claude-status",
-                    "textColor": "none"
-                },
-                {
-                    "cpuIntensive": false,
-                    "defaultSettings": {
                         "binPath": "~/.local/bin/git-status",
                         "intervalMs": 60000,
                         "terminalCmd": "kitty"
