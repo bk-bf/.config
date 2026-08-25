@@ -1,11 +1,6 @@
-# gitleaks config for this dotfiles repo.
-# Keep all of gitleaks' built-in rules, then allow-list known-safe vendored defaults.
 [extend]
 useDefault = true
 
-# uosc ships a shared upstream OpenSubtitles API key for its subtitle-download
-# feature. It's a vendored consumer default, not a personal secret — exempt just
-# that one value in that one file (path AND regex must both match).
 [[allowlists]]
 description = "uosc bundled upstream OpenSubtitles API key (vendored default)"
 condition = "AND"

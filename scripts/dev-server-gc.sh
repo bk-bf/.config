@@ -1,34 +1,7 @@
 #!/usr/bin/env bash
-# dev-server-gc: reap abandoned node/vite dev servers.
-#
-# A dev server started with `pnpm dev` in a terminal keeps running after the
-# terminal closes -- it is reparented to the systemd user manager and listens
-# forever. The next `pnpm dev` finds the port taken and picks the next one, so
-# they accumulate: twelve dashboard/web servers on ports 5201-5310 were found on
-# 2026-07-27, holding ~3 GB between them.
-#
-# A server is reaped only when ALL of these hold:
-#   1. it holds a LISTEN socket (it is a server, not a build step)
-#   2. its process tree is rooted at the systemd user manager -- i.e. the shell
-#      that launched it is gone. A server started from a terminal you still have
-#      open, or from VS Code, is never a candidate.
-#   3. it is NOT a managed systemd unit. A service's parent is also the user
-#      manager, so criterion 2 alone cannot tell "orphaned" from "supervised" --
-#      the cgroup can: a unit lives in app.slice/<name>.service, while an
-#      orphaned dev server keeps the cgroup of the terminal that launched it.
-#      (Learned the hard way: the first run killed codegraph.service, which
-#      systemd restarted three seconds later.)
-#   4. it has ZERO established connections -- nothing is using it
-#   5. it is older than MIN_AGE
-#
-# Criterion 4 protects a server you are actively hitting in a browser;
-# criterion 2 protects one you are about to hit; criterion 3 protects the ones
-# you deliberately supervise.
-#
-# Usage: dev-server-gc.sh [--dry-run]
 set -euo pipefail
 
-export DEV_SERVER_GC_MIN_AGE=${DEV_SERVER_GC_MIN_AGE:-3600}   # seconds
+export DEV_SERVER_GC_MIN_AGE=${DEV_SERVER_GC_MIN_AGE:-3600}
 export DEV_SERVER_GC_DRY=0
 [[ "${1:-}" == "--dry-run" ]] && export DEV_SERVER_GC_DRY=1
 

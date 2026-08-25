@@ -7,10 +7,6 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=%h/.local/bin/claude-status --push
 
-# Same posture as the osd sync units — this is batch work that must never
-# compete with the desktop. It is also allowed to fail quietly: the server
-# reports a machine that stopped pushing as stale, which is the correct
-# outcome when the laptop is asleep or off the tailnet.
 Slice=background.slice
 OOMScoreAdjust=700
 MemoryMax=256M

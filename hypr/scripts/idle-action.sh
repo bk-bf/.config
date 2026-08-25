@@ -39,10 +39,6 @@ case "$MODE" in
         if has_fullscreen_window; then
             exit 0
         fi
-        # loginctl lock-session is async — it returns before WlSessionLock is established.
-        # If suspend begins while Quickshell is mid-handshake the lockscreen crashes on
-        # resume. Use qs IPC directly (synchronous round-trip), then wait 1 s for the
-        # compositor to commit the lock surface before the kernel freezes memory.
         qs -c noctalia-shell ipc call lockScreen lock
         sleep 1
         ;;

@@ -1,24 +1,3 @@
-"""Paste that follows the clipboard rather than the key.
-
-Kitty's built-in paste is text-only, so an image on the clipboard arrives as
-nothing. Programs that read the clipboard themselves — Claude Code, which
-attaches images and pastes text from the same Ctrl+V — need the keypress
-instead. This picks per paste:
-
-  text                     paste as usual
-  image, local shell       forward a literal Ctrl+V (0x16) to the program
-  image, ssh/mosh session  upload it and type the path it landed on
-
-The remote case exists because a program on the far end reads the clipboard of
-the machine it runs on, which is the server's, and that one is always empty.
-The upload runs off the main loop so a slow or unreachable host cannot freeze
-the terminal.
-
-Finding the session is the fiddly part. A multiplexer owns its panes' ptys, so
-the window's own foreground process is just the multiplexer; herdr is asked
-which pane has focus rather than guessed at, so a local pane sitting next to a
-remote one still pastes locally.
-"""
 
 import json
 import os
@@ -34,13 +13,10 @@ SSH_CONFIG = os.path.expanduser('~/.ssh/config')
 HERDR = os.path.expanduser('~/.local/bin/herdr')
 UPLOAD_TIMEOUT = 25.0
 
-# Short ssh flags that consume the argument after them, so an option value is
-# never mistaken for the hostname.
 SSH_FLAGS_WITH_VALUE = frozenset('bcDEeFIiJLlmOopQRSWw')
 
 
 def _ssh_aliases() -> dict[str, str]:
-    """Map HostName back to Host, so a mosh-client IP names a host ssh knows."""
     aliases: dict[str, str] = {}
     host = None
     try:
@@ -77,7 +53,6 @@ def _host_from_argv(argv: list[str]) -> str | None:
         return None
     prog = os.path.basename(argv[0])
     if prog == 'mosh-client' and len(argv) >= 3:
-        # mosh-client [-# ...] <ip> <port>
         return _ssh_aliases().get(argv[-2], argv[-2])
     if prog == 'ssh':
         return _hostname_from_ssh(argv)
@@ -102,7 +77,6 @@ def _children_by_parent() -> dict[int, list[int]]:
                 stat = f.read()
         except OSError:
             continue
-        # comm sits in parens and may itself contain spaces, so parse after it
         end = stat.rfind(b')')
         fields = stat[end + 2:].split()
         if len(fields) < 2:
@@ -130,8 +104,6 @@ def _descendants(root: int) -> list[int]:
 
 
 def _herdr_focused_host() -> tuple[bool, str | None]:
-    """Ask herdr what its focused pane is running. Returns (answered, host) so
-    a pane that is merely local stays distinguishable from herdr not replying."""
     try:
         proc = subprocess.run(
             [HERDR, 'pane', 'process-info', '--current'],
@@ -154,7 +126,6 @@ def _herdr_focused_host() -> tuple[bool, str | None]:
 
 
 def _remote_host(w: Any) -> str | None:
-    """The host the window is logged into, or None when it is a local shell."""
     try:
         procs = w.child.foreground_processes
     except Exception:
@@ -171,19 +142,14 @@ def _remote_host(w: Any) -> str | None:
     if not pid:
         return None
 
-    # Past this point the window runs a multiplexer, which owns its panes' ptys
-    # and hides them from the window's own foreground processes.
     below = _descendants(pid)
     cmdlines = {p: _cmdline(p) for p in below}
 
     if any(argv and os.path.basename(argv[0]) == 'herdr' for argv in cmdlines.values()):
         answered, host = _herdr_focused_host()
         if answered:
-            # Trust it: a local focused pane must not inherit another pane's host.
             return host
 
-    # Last resort. Only answer when the window holds exactly one session, since
-    # there is otherwise no way to tell which pane the paste is meant for.
     hosts = {h for argv in cmdlines.values() if (h := _host_from_argv(argv))}
     return hosts.pop() if len(hosts) == 1 else None
 
@@ -235,7 +201,6 @@ def handle_result(args: list[str], answer: str, target_window_id: int, boss: Any
     w = boss.window_for_dispatch or boss.active_window
     if w is None:
         return
-    # A program using the clipboard-read protocol handles its own paste.
     if w.send_paste_event():
         return
 

@@ -6,6 +6,5 @@ Documentation=man:systemd.timer(5)
 Type=oneshot
 ExecStart=%h/.config/scripts/claude-vscode-session-gc.sh
 
-# This exists to free memory; it must never be a consumer itself.
 MemoryMax=64M
 OOMScoreAdjust=500

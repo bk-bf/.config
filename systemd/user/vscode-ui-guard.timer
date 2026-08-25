@@ -2,8 +2,6 @@
 Description=Daily backstop for the VS Code modern-UI opt-out guard
 
 [Timer]
-# The path unit catches the real events; this only exists so a change that
-# happened while logged out cannot sit undetected.
 OnBootSec=5min
 OnUnitActiveSec=1d
 AccuracySec=1h

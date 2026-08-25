@@ -1,6 +1,5 @@
 @import url("noctalia-colors.css");
 
-/* Windows, dialogs */
 window,
 dialog,
 .background {
@@ -8,7 +7,6 @@ dialog,
   color: @window_fg_color;
 }
 
-/* Menus (nm-applet, blueman right-click) */
 menu,
 menubar,
 .menu,
@@ -43,7 +41,6 @@ separator,
   background-color: @headerbar_border_color;
 }
 
-/* Popovers (nm-applet connection picker etc.) */
 popover,
 .popover {
   background-color: @popover_bg_color;
@@ -53,7 +50,6 @@ popover,
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
 }
 
-/* Tooltips */
 tooltip,
 .tooltip {
   background-color: @card_bg_color;
@@ -66,7 +62,6 @@ tooltip label {
   color: @window_fg_color;
 }
 
-/* Buttons */
 button {
   background-color: @headerbar_bg_color;
   color: @window_fg_color;
@@ -84,7 +79,6 @@ button:checked {
   color: @accent_fg_color;
 }
 
-/* Scrollbars */
 scrollbar slider {
   background-color: @headerbar_border_color;
   border-radius: 999px;
@@ -96,12 +90,10 @@ scrollbar slider:hover {
   background-color: @accent_bg_color;
 }
 
-/* Labels */
 label {
   color: @window_fg_color;
 }
 
-/* Entry (text inputs) */
 entry {
   background-color: @view_bg_color;
   color: @view_fg_color;

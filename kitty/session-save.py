@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""Snapshot kitty windows (workspace + cwd + foreground command) for reboot
-session restore. Companion to session-restore.sh / session-window.sh.
-
-State comes from `hyprctl clients` (which workspace each window is on) and /proc
-(the foreground process's cwd and argv) — no kitty remote control required, so
-every running kitty is captured regardless of its listen_on socket. hyprflow is
-told to ignore kitty (hyprflow/config.toml) so the two never both relaunch it.
-
-Run periodically via the kitty-session-save.timer systemd user unit.
-"""
 import json
 import os
 import shlex
@@ -31,7 +21,6 @@ def read_bytes(path):
 
 
 def build_process_tables():
-    """Return (children_by_ppid, comm_by_pid) from a single /proc scan."""
     kids, comm = {}, {}
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
@@ -44,7 +33,7 @@ def build_process_tables():
         pid = int(entry)
         comm[pid] = s[s.find("(") + 1:rp]
         after = s[rp + 2:].split()
-        kids.setdefault(int(after[1]), []).append(pid)  # after[1] = ppid
+        kids.setdefault(int(after[1]), []).append(pid)
     return kids, comm
 
 
@@ -71,14 +60,12 @@ def cwd_of(pid):
 
 
 def foreground(kpid, kids, comm):
-    """Foreground process of the kitty window: kitty's child is the shell, and
-    the controlling tty's tpgid names the foreground process-group leader."""
     shell = next((c for c in kids.get(kpid, []) if comm.get(c) in SHELLS), None)
     if shell is None:
         childs = kids.get(kpid, [])
         shell = childs[0] if childs else kpid
     after = stat_after(shell)
-    tpgid = int(after[5]) if after else -1  # field 8 (0-based 5 after comm) = tpgid
+    tpgid = int(after[5]) if after else -1
     fg = tpgid if tpgid > 0 else shell
     is_shell = fg == shell or comm.get(fg) in SHELLS
     return fg, shell, is_shell
@@ -97,7 +84,7 @@ def main():
             continue
         ws = (c.get("workspace") or {}).get("id")
         if not isinstance(ws, int) or ws < 1:
-            continue  # skip special / scratchpad workspaces
+            continue
         kpid = c.get("pid")
         if not kpid:
             continue

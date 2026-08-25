@@ -2,18 +2,9 @@
 Description=Watch the Noctalia shell for package updates that touch forked files
 
 [Path]
-# inotify, not polling: costs nothing until one of the two forked files changes.
-#
-# Watch the FORK REPO, not /etc/xdg. ~/.config/quickshell/noctalia-shell is a
-# symlink to ~/Documents/local/Projects/noctalia, so that repo is the shell that
-# actually runs; the packaged tree under /etc/xdg is v4 frozen at the 2026-06-09
-# build and will not move again. These files change when he pulls
-# upstream/legacy-v4 into the fork, not when pacman runs.
 PathChanged=/home/kirill/Documents/local/Projects/noctalia/Modules/Bar/Widgets/SystemMonitor.qml
 PathChanged=/home/kirill/Documents/local/Projects/noctalia/Modules/Panels/Settings/Bar/WidgetSettings/SystemMonitorSettings.qml
 
-# A package upgrade replaces the whole tree; give it a moment to settle so the
-# merge does not run against a half-written directory.
 Unit=noctalia-fork-sync.service
 
 [Install]

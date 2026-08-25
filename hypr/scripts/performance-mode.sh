@@ -1,11 +1,4 @@
 #!/bin/bash
-# Performance mode toggle script for Noctalia hooks
-# Usage: performance-mode.sh [enable|disable]
-#
-# enable  → performance: PL1=28W PL2=45W, governor=performance, platform=performance
-# disable → balanced:    PL1=15W PL2=25W, governor=powersave,   platform=balanced
-#
-# Requires /etc/sudoers.d/performance-mode for passwordless execution.
 
 set -euo pipefail
 
@@ -21,9 +14,6 @@ apply_governor() {
 
 apply_intel_undervolt() {
     local conf="$1"
-    # intel-undervolt has no -c flag; it always reads /etc/intel-undervolt.conf
-    # which is a symlink → ~/.config/intel-undervolt/intel-undervolt.conf
-    # Copy the desired mode config into the canonical file and apply.
     sudo cp "$conf" "$CONF_DIR/intel-undervolt.conf"
     sudo intel-undervolt apply
 }

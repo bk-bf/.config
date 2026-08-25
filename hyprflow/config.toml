@@ -1,10 +1,2 @@
-# hyprflow restores every window class EXCEPT kitty.
-#
-# Kitty is handled by ~/.config/kitty/session-{save,restore}.sh instead, which
-# actually RE-RUNS whatever each terminal was running (nvim, htop, ...) at its
-# directory — hyprflow can only echo the last command as a comment, never run it.
-# Listing kitty here stops hyprflow from also relaunching it (which would double
-# up the windows). Everything after "kitty" is hyprflow's built-in default set,
-# repeated because setting ignore_classes replaces the defaults.
 [filters]
 ignore_classes = ["kitty", "waybar", "wofi", "mako", "polkit", "nm-applet", "xdg-desktop-portal"]

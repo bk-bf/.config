@@ -2,8 +2,6 @@
 Description=Periodic kitty session snapshot (see kitty/session-save.py)
 
 [Timer]
-# Snapshot every 2 min so a reboot restores state at most ~2 min stale
-# (same periodic model as tmux-continuum). First run 1 min after boot.
 OnBootSec=1min
 OnUnitActiveSec=2min
 

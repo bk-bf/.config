@@ -1,8 +1,5 @@
 #!/bin/bash
-# S2idle Power Optimization for Galaxy Book Gen4
-# Enables aggressive runtime power management for all devices
 
-# Exit on error
 set -e
 
 echo "═══════════════════════════════════════════════════════════"
@@ -10,7 +7,6 @@ echo "  S2idle Power Management Optimization"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 
-# Check if running as root
 if [ "$EUID" -ne 0 ]; then 
    echo "ERROR: This script must be run as root (use sudo)"
    exit 1
@@ -27,7 +23,6 @@ echo "[2/5] Enabling USB autosuspend..."
 for dev in /sys/bus/usb/devices/*/power/control; do
     echo "auto" > "$dev" 2>/dev/null || true
 done
-# Set shorter autosuspend timeout (2 seconds)
 for dev in /sys/bus/usb/devices/*/power/autosuspend; do
     echo "2" > "$dev" 2>/dev/null || true
 done
@@ -36,7 +31,6 @@ echo "✓ USB autosuspend enabled"
 echo ""
 echo "[3/5] Enabling WiFi power save..."
 if command -v iw &> /dev/null; then
-    # Get WiFi interface name
     WIFI_IFACE=$(iw dev | awk '/Interface/{print $2}' | head -1)
     if [ -n "$WIFI_IFACE" ]; then
         iw dev "$WIFI_IFACE" set power_save on 2>/dev/null || true
@@ -50,10 +44,8 @@ fi
 
 echo ""
 echo "[4/5] Configuring display power management..."
-# Enable display framebuffer compression (if supported)
 if [ -d /sys/module/i915 ]; then
     echo "✓ i915 (Intel graphics) module loaded"
-    # These are already set via kernel parameters in permanent config
 fi
 
 echo ""

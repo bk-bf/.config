@@ -6,6 +6,5 @@ Documentation=man:systemd.path(5)
 Type=oneshot
 ExecStart=%h/.config/scripts/noctalia-fork-sync sync
 
-# Never let a merge helper become the memory problem it lives next to.
 MemoryMax=128M
 OOMScoreAdjust=500

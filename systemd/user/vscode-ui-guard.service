@@ -4,8 +4,5 @@ Description=Keep VS Code's modern-UI panel borders switched off across updates
 [Service]
 Type=oneshot
 ExecStart=%h/.config/scripts/vscode-modern-ui-guard.sh
-# claude lives in ~/.local/bin; a user unit does not get the login shell's PATH.
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-# Two triggers (path + timer) can fire close together after a package upgrade.
-# The work is idempotent, but there is no point running it twice over.
 StartLimitIntervalSec=0

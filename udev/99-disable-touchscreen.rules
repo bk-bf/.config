@@ -1,2 +1,1 @@
-# Galaxy Book4 GXTP7936 Touchscreen
 SUBSYSTEM=="input", ATTRS{name}=="GXTP7936:00 27C6:0123", ENV{LIBINPUT_IGNORE_DEVICE}="1"
