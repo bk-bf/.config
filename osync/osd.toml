@@ -30,19 +30,3 @@ ssh_port = 22
 exclude = ".git;.svn;.hg;node_modules;__pycache__;.venv;venv;target;dist;build;.cache;.mypy_cache;.pytest_cache;.smart-env;.DS_Store;*.pyc;*.swp;*.tmp;*.part;.osync-part"
 auto = "periodic"
 interval = "5m"
-
-[[connection]]
-name = "memory-universal"
-local = "/home/kirill/memory-universal"
-remote = "/home/ubuntu/memory-universal"
-direction = "sync"
-mode = "ts"
-user = "ubuntu"
-key = "/home/kirill/.ssh/id_ed25519"
-ts_host = "ubuntu"
-ts_port = 22
-ssh_host = ""
-ssh_port = 22
-exclude = ".osync-part;.DS_Store;*.tmp;*.swp;*.part"
-auto = "periodic"
-interval = "5m"

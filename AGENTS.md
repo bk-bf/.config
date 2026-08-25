@@ -18,38 +18,6 @@ Instructions for AI agents (OpenCode, etc.) working in this repository.
 - **Never install packages** or run `yay`/`pacman` unless explicitly asked.
 - **Never run `hyprctl reload`** or restart services unless explicitly asked — this is a live desktop.
 
-## Memory frontmatter
-
-Every memory file carries a scope, and you decide it as you write:
-
-```yaml
-metadata:
-  node_type: memory
-  type: user | feedback | project | reference
-  scope: universal | device
-  device: <hostname>        # only when scope is device
-  tags: [optional, freeform]
-```
-
-**scope answers one question: is this still true on another machine?**
-
-- `universal` — how Kirill wants to be worked with, facts about a codebase,
-  network topology, anything that travels. These are the ones synced to his
-  other devices, so writing one is writing for every machine he uses.
-- `device` — this box's hardware, desktop session, or installed services: the
-  laptop's soldered RAM, a Hyprland quirk, the media server's docker stack.
-  Name the machine in `device:`.
-
-Default to `universal` when genuinely torn. A wrongly-universal note shows up
-somewhere mildly irrelevant; a wrongly-device note is invisible on the machine
-that needed it, which is the more expensive mistake. But do not reach for it out
-of laziness — a note that says "on this machine" is device-scoped, and shipping
-it elsewhere makes it quietly false rather than merely useless.
-
-Browse and edit all of them at `http://localhost:8790/memory`, or on the
-dashboard at `https://dashboard.callmedaddy.dedyn.io/memory`, which shows every
-machine's notes. Universal ones sync between devices; device ones stay put.
-
 ## Shell environment
 
 - **Default to `mosh` for remote work** on `ubuntu` (`mosh ubuntu`). It
