@@ -57,7 +57,6 @@ UID = os.getuid()
 # monitor that quietly stopped existing is the failure mode worth seeing.
 WATCHED_UNITS = [
     ("journal-notify.service", "journal watcher"),
-    ("claude-memory-sync.timer", "memory mirror"),
 ]
 
 
@@ -605,8 +604,8 @@ def backfill_reports() -> int:
 # hands an incident to watcher, which runs `claude -p`. It is listed explicitly
 # rather than discovered, because "does this unit eventually run a Claude
 # agent" is not something you can tell by reading an ExecStart: every other
-# claude-* timer here manages Claude's artifacts (reaping processes, syncing
-# memory, garbage-collecting sessions) without ever starting one. Calling those
+# claude-* timer here manages Claude's artifacts (reaping processes,
+# garbage-collecting sessions) without ever starting one. Calling those
 # triggers would be a lie that hides the single one that matters.
 def triggers() -> list[dict]:
     jn = unit_state("journal-notify.service")
@@ -658,7 +657,6 @@ def watcher_config() -> dict:
 # in the same list.
 JOB_UNITS = [
     ("journal-notify.service", "journal watcher", "watches every unit; feeds watcher"),
-    ("claude-memory-sync.timer", "memory mirror", "syncs ~/.claude memory between hosts"),
     ("claude-reaper.timer", "session reaper", "kills orphaned Claude processes"),
     ("claude-vscode-session-gc.timer", "vscode session gc", "prunes editor session files"),
     ("claude-status-push.timer", "status push", "ships this snapshot to the dashboard"),
