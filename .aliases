@@ -223,5 +223,3 @@ bgr() {
     fi
     systemd-run --user --slice=background.slice --scope --quiet -- "$@"
 }
-
-alias ymc="youtube-music-cli"
