@@ -85,7 +85,7 @@ echo "    Written /etc/sddm.conf (QT_SCALE_FACTOR=2: $IS_HIDPI_LAPTOP)"
 $IS_HIDPI_LAPTOP || WARNINGS+=("sddm: if SDDM greeter appears too small, add QT_SCALE_FACTOR=2 to GreeterEnvironment in /etc/sddm.conf")
 
 sudo ln -sf "$CONFIG/sddm/wallpaper-sync.sh" /usr/local/bin/sddm-wallpaper-sync.sh
-sudo ln -sf "$CONFIG/sddm/wallpaper-sync.service" /etc/systemd/system/sddm-wallpaper-sync.service
+sudo install -Dm644 "$CONFIG/sddm/wallpaper-sync.service" /etc/systemd/system/sddm-wallpaper-sync.service
 sudo systemctl enable --now sddm-wallpaper-sync.service
 echo "    sddm wallpaper-sync → enabled (follows noctalia)"
 
@@ -96,10 +96,9 @@ sudo mkdir -p /etc/pacman.d/hooks
 sudo ln -sf "$CONFIG/pkg-tracker.hook" /etc/pacman.d/hooks/pkg-tracker.hook
 
 
-sudo mkdir -p /etc/systemd/system/cachyos-rate-mirrors.service.d
-sudo ln -sf "$CONFIG/systemd/cachyos-rate-mirrors-wait-for-network.conf" \
+sudo install -Dm644 "$CONFIG/systemd/cachyos-rate-mirrors-wait-for-network.conf" \
     /etc/systemd/system/cachyos-rate-mirrors.service.d/wait-for-network.conf
-echo "    cachyos-rate-mirrors → wait-for-network drop-in symlinked"
+echo "    cachyos-rate-mirrors → wait-for-network drop-in installed"
 
 
 echo ""
@@ -139,10 +138,10 @@ fi
 
 
 if $IS_GALAXY_BOOK; then
-    sudo ln -sf "$CONFIG/s2idle/s2idle-optimize.service" /etc/systemd/system/s2idle-optimize.service
+    sudo install -Dm644 "$CONFIG/s2idle/s2idle-optimize.service" /etc/systemd/system/s2idle-optimize.service
     sudo chmod +x "$CONFIG/s2idle/s2idle-optimize.sh"
     sudo ln -sf "$CONFIG/s2idle/s2idle-optimize.sh" /usr/local/bin/s2idle-optimize.sh
-    echo "    s2idle → symlinked"
+    echo "    s2idle → unit installed, script symlinked"
 else
     WARNINGS+=("s2idle: skipped — tuned for Galaxy Book Gen4 power management")
     $IS_LAPTOP && WARNINGS+=("        Laptop detected — consider adapting for your hardware")
