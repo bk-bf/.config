@@ -7,10 +7,6 @@
         }
     ],
     "states": {
-        "claude-status": {
-            "enabled": true,
-            "sourceUrl": "https://github.com/noctalia-dev/noctalia-plugins"
-        },
         "dashboard-usage": {
             "enabled": true,
             "sourceUrl": "https://github.com/noctalia-dev/noctalia-plugins"
