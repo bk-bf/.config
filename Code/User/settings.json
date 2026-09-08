@@ -233,4 +233,5 @@
   "editor.definitionLinkOpensInPeek": true,
   "window.openFilesInNewWindow": "on",
   "workbench.experimental.modernUI": false,
+  "go.toolsManagement.autoUpdate": true,
 }
