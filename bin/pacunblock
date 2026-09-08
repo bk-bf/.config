@@ -2,6 +2,7 @@
 set -uo pipefail
 
 PROG=${0##*/}
+CONF=${PACUNBLOCK_CONF:-${XDG_CONFIG_HOME:-$HOME/.config}/pacunblock.conf}
 STATE=${XDG_STATE_HOME:-$HOME/.local/state}/pacunblock
 MAX_ROUNDS=8
 ASSUME_YES=0
@@ -16,19 +17,29 @@ usage() {
     cat <<EOF
 usage: $PROG [-y] [package...]
 
-Clears the stale packages blocking a full system upgrade, then runs the
-upgrade, then puts back anything that turned out to still be needed.
+Clears the stale packages blocking a full system upgrade, runs the upgrade,
+then puts back anything that turned out to still be needed.
 
-Each round asks pacman what it would do, reads the errors, and removes the
-installed package named as the blocker. A blocker that is still carried by a
-repo is never removed without an explicit answer, because there the real fix
-is a rebuild upstream, not a removal here.
+Run it with no arguments. It finds the blockers itself: each round it asks
+pacman what it would do, reads the errors, and removes the installed package
+pacman names as being in the way. A blocker that a repo still carries is never
+removed without an explicit answer, because there the fix is a rebuild
+upstream, not a removal here.
 
-  -y, --yes    do not ask before removing a blocker that no repo carries
+When a removal leaves something unprovided and more than one package could
+provide it, that is a choice no dependency graph can make, so it asks once and
+writes the answer to
+
+    $CONF
+
+as a "name = package" line. After that the same choice is silent forever. Edit
+or delete lines there to change your mind.
+
+  -y, --yes    do not ask before removing a blocker no repo carries any more
   -h, --help   this
 
-Any package named on the command line is added to the upgrade, which is how a
-replacement gets pulled in:
+Naming a package adds it to the upgrade, which forces a swap that pacman would
+not make on its own:
 
   $PROG pipewire-jack
 EOF
@@ -46,6 +57,7 @@ done
 
 command -v pacman >/dev/null || die "no pacman on this machine"
 [[ $EUID -eq 0 ]] && die "run as your own user; $PROG calls sudo where it needs to"
+[[ -e /var/lib/pacman/db.lck ]] && die "another pacman transaction holds /var/lib/pacman/db.lck; let it finish"
 
 mkdir -p "$STATE"
 LOG=$STATE/$(date +%Y%m%d-%H%M%S).log
@@ -57,9 +69,7 @@ installed_version() { pacman -Q "$1" 2>/dev/null | awk '{print $2}'; }
 
 repo_version() { pacman -Si "$1" 2>/dev/null | awk -F': *' '/^Version/{print $2; exit}'; }
 
-required_by() {
-    pacman -Qi "$1" 2>/dev/null | awk -F': *' '/^Required By/{print $2; exit}'
-}
+required_by() { pacman -Qi "$1" 2>/dev/null | awk -F': *' '/^Required By/{print $2; exit}'; }
 
 cached_file() {
     local name=$1 ver=$2 f
@@ -69,6 +79,94 @@ cached_file() {
     done
 }
 
+providers_for() {
+    local db
+    for db in /var/lib/pacman/sync/*.db; do
+        bsdtar -xOf "$db" '*/desc' 2>/dev/null
+    done | awk -v want="$1" '
+        BEGIN          { bare = want; sub(/[<>=].*/, "", bare) }
+        /^%NAME%$/     { getline n; if (n == bare) print n; next }
+        /^%PROVIDES%$/ { inp = 1; next }
+        /^%/           { inp = 0; next }
+        inp && NF      { p = $0; b = p; sub(/[<>=].*/, "", b)
+                         if (p == want || (want == bare && b == bare)) print n }
+        inp && !NF     { inp = 0 }
+    ' | sort -u
+}
+
+provider_note() {
+    local extras
+    extras=$(pacman -Sp --print-format '%n' "$1" 2>/dev/null | grep -cvx "$1")
+    ((extras)) && printf 'also pulls in %d other package(s)' "$extras" || printf 'adds nothing else'
+}
+
+preference_for() {
+    [[ -r $CONF ]] || return 1
+    awk -F' *= *' -v k="$1" '
+        /^[[:space:]]*(#|$)/ { next }
+        { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $1) }
+        $1 == k { print $2; hit = 1; exit }
+        END { exit !hit }
+    ' "$CONF"
+}
+
+remember() {
+    printf '%s = %s\n' "$1" "$2" >>"$CONF"
+    say "remembered '$1 = $2' in $CONF; it will not ask again"
+}
+
+choose_provider() {
+    local want=$1 pref cands=() i reply
+    if pref=$(preference_for "$want"); then printf '%s\n' "$pref"; return 0; fi
+    mapfile -t cands < <(providers_for "$want")
+    case ${#cands[@]} in
+        0) return 1 ;;
+        1) printf '%s\n' "${cands[0]}"; return 0 ;;
+    esac
+    [[ -t 0 || -e /dev/tty ]] || die "$want has ${#cands[@]} possible providers and there is no terminal to ask on; record one in $CONF"
+    {
+        printf '\n  \033[1m%s\033[0m is needed and %d packages provide it:\n' "$want" "${#cands[@]}"
+        for i in "${!cands[@]}"; do
+            printf '    %d) %-22s %s\n' $((i + 1)) "${cands[i]}" "$(provider_note "${cands[i]}")"
+        done
+        printf '  pacman left alone would take %s, on repo order alone.\n' "${cands[0]}"
+    } >/dev/tty
+    read -r -p "  which one? [1] " reply </dev/tty >/dev/tty
+    [[ -z $reply ]] && reply=1
+    [[ $reply =~ ^[0-9]+$ ]] && ((reply >= 1 && reply <= ${#cands[@]})) \
+        || die "'$reply' is not one of the offered numbers"
+    remember "$want" "${cands[reply - 1]}" >/dev/tty
+    printf '%s\n' "${cands[reply - 1]}"
+}
+
+unmet_names() { pacman -Dk 2>&1 | sed -nE 's/.*requires ([^ ]+).*/\1/p' | sort -u; }
+
+covered_by() {
+    local g=$1 c p
+    shift
+    (($#)) || return 1
+    mapfile -t c < <(providers_for "$g")
+    for p in "$@"; do
+        printf '%s\n' "${c[@]}" | grep -qx "$p" && return 0
+    done
+    return 1
+}
+
+resolve_gaps() {
+    local g pick picked=()
+    while IFS= read -r g; do
+        [[ -z $g ]] && continue
+        pacman -Qq "${g%%[<>=]*}" &>/dev/null && continue
+        covered_by "$g" "${picked[@]}" && continue
+        if pick=$(choose_provider "$g"); then
+            picked+=("$pick")
+            printf '%s\n' "$pick"
+        else
+            warn "nothing in any repo provides '$g'"
+        fi
+    done < <(unmet_names) | sort -u
+}
+
 probe() { yes | pacman -Su --print "${EXTRA[@]}" 2>&1; }
 
 blockers_from() {
@@ -76,15 +174,13 @@ blockers_from() {
     while IFS= read -r line; do
         case $line in
             *'breaks dependency'*'required by '*)
-                sed -E 's/.*required by ([^ ]+).*/\1/' <<<"$line"
-                ;;
+                sed -E 's/.*required by ([^ ]+).*/\1/' <<<"$line" ;;
             ':: '*' and '*' are in conflict'*)
                 a=$(sed -E 's/^:: ([^ ]+) and ([^ ]+) are in conflict.*/\1/' <<<"$line")
                 b=$(sed -E 's/^:: ([^ ]+) and ([^ ]+) are in conflict.*/\2/' <<<"$line")
                 for name in "$(pkgname "$a")" "$(pkgname "$b")"; do
                     pacman -Qq "$name" &>/dev/null && printf '%s\n' "$name"
-                done
-                ;;
+                done ;;
         esac
     done | sort -u
 }
@@ -147,30 +243,25 @@ if grep -q '^error:' <<<"$out"; then
     die "still blocked after $MAX_ROUNDS rounds"
 fi
 
+if ((${#removed[@]})); then
+    step "Looking for anything the removals left unprovided"
+    mapfile -t fill < <(resolve_gaps)
+    if ((${#fill[@]})); then
+        say "adding to the upgrade: ${fill[*]}"
+        EXTRA+=("${fill[@]}")
+    else
+        say "nothing went missing"
+    fi
+fi
+
 step "Upgrading"
 sudo pacman -Su "${EXTRA[@]}" || die "upgrade failed; removals so far are listed in $LOG"
 
 step "Checking what the removals left behind"
-gaps=$(pacman -Dk 2>&1 | sed -nE 's/.*requires ([^ ><=]+).*/\1/p' | sort -u)
-
-if [[ -z $gaps ]]; then
-    say "no unmet dependencies"
-else
-    back=() lost=()
-    while IFS= read -r g; do
-        [[ -z $g ]] && continue
-        pacman -Qq "$g" &>/dev/null && continue
-        if pacman -Si "$g" &>/dev/null; then back+=("$g"); else lost+=("$g"); fi
-    done <<<"$gaps"
-
-    if ((${#back[@]})); then
-        step "Putting back ${back[*]}"
-        sudo pacman -S --asdeps --needed "${back[@]}" || die "reinstall failed"
-    fi
-
-    if ((${#lost[@]})); then
-        warn "no repo carries these, and something installed still asks for them: ${lost[*]}"
-    fi
+mapfile -t back < <(resolve_gaps)
+if ((${#back[@]})); then
+    step "Putting back ${back[*]}"
+    sudo pacman -S --asdeps --needed "${back[@]}" || die "reinstall failed"
 fi
 
 step "Result"
