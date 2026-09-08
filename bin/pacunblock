@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+PROG=${0##*/}
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/pacunblock
+MAX_ROUNDS=8
+ASSUME_YES=0
+EXTRA=()
+
+say()  { printf '\033[1;34m::\033[0m %s\n' "$*"; }
+step() { printf '\n\033[1;32m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
+warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31mxx\033[0m %s\n' "$*" >&2; exit 1; }
+
+usage() {
+    cat <<EOF
+usage: $PROG [-y] [package...]
+
+Clears the stale packages blocking a full system upgrade, then runs the
+upgrade, then puts back anything that turned out to still be needed.
+
+Each round asks pacman what it would do, reads the errors, and removes the
+installed package named as the blocker. A blocker that is still carried by a
+repo is never removed without an explicit answer, because there the real fix
+is a rebuild upstream, not a removal here.
+
+  -y, --yes    do not ask before removing a blocker that no repo carries
+  -h, --help   this
+
+Any package named on the command line is added to the upgrade, which is how a
+replacement gets pulled in:
+
+  $PROG pipewire-jack
+EOF
+}
+
+while (($#)); do
+    case $1 in
+        -y|--yes)  ASSUME_YES=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        --)        shift; EXTRA+=("$@"); break ;;
+        -*)        die "unknown option $1" ;;
+        *)         EXTRA+=("$1"); shift ;;
+    esac
+done
+
+command -v pacman >/dev/null || die "no pacman on this machine"
+[[ $EUID -eq 0 ]] && die "run as your own user; $PROG calls sudo where it needs to"
+
+mkdir -p "$STATE"
+LOG=$STATE/$(date +%Y%m%d-%H%M%S).log
+: >"$LOG"
+
+pkgname() { sed -E 's/-[^-]+-[^-]+$//' <<<"$1"; }
+
+installed_version() { pacman -Q "$1" 2>/dev/null | awk '{print $2}'; }
+
+repo_version() { pacman -Si "$1" 2>/dev/null | awk -F': *' '/^Version/{print $2; exit}'; }
+
+required_by() {
+    pacman -Qi "$1" 2>/dev/null | awk -F': *' '/^Required By/{print $2; exit}'
+}
+
+cached_file() {
+    local name=$1 ver=$2 f
+    for f in /var/cache/pacman/pkg/"$name-${ver//:/}"-*.pkg.tar.zst \
+             /var/cache/pacman/pkg/"$name-$ver"-*.pkg.tar.zst; do
+        [[ -f $f ]] && { printf '%s\n' "$f"; return; }
+    done
+}
+
+probe() { yes | pacman -Su --print "${EXTRA[@]}" 2>&1; }
+
+blockers_from() {
+    local line a b name
+    while IFS= read -r line; do
+        case $line in
+            *'breaks dependency'*'required by '*)
+                sed -E 's/.*required by ([^ ]+).*/\1/' <<<"$line"
+                ;;
+            ':: '*' and '*' are in conflict'*)
+                a=$(sed -E 's/^:: ([^ ]+) and ([^ ]+) are in conflict.*/\1/' <<<"$line")
+                b=$(sed -E 's/^:: ([^ ]+) and ([^ ]+) are in conflict.*/\2/' <<<"$line")
+                for name in "$(pkgname "$a")" "$(pkgname "$b")"; do
+                    pacman -Qq "$name" &>/dev/null && printf '%s\n' "$name"
+                done
+                ;;
+        esac
+    done | sort -u
+}
+
+confirm() {
+    local reply
+    read -r -p "$1 [y/N] " reply </dev/tty || return 1
+    [[ $reply == [yY]* ]]
+}
+
+step "Refreshing package databases"
+sudo pacman -Sy || die "database sync failed"
+
+removed=()
+
+for ((round = 1; round <= MAX_ROUNDS; round++)); do
+    step "Round $round — asking pacman what blocks the upgrade"
+    out=$(probe)
+
+    if ! grep -q '^error:' <<<"$out"; then
+        say "nothing blocks it"
+        break
+    fi
+
+    grep -E '^(error|:: )' <<<"$out" | sed 's/^/    /'
+
+    mapfile -t found < <(blockers_from <<<"$out")
+    ((${#found[@]})) || die "pacman refused the transaction and named no package this script can act on"
+
+    todo=()
+    for p in "${found[@]}"; do
+        iv=$(installed_version "$p")
+        rv=$(repo_version "$p")
+        printf '\n  \033[1m%s\033[0m %s\n' "$p" "$iv"
+        printf '    required by: %s\n' "$(required_by "$p")"
+        if [[ -n $rv ]]; then
+            printf '    still carried by a repo at %s\n' "$rv"
+            warn "$p is still packaged; removing it is usually the wrong fix, waiting for its rebuild is the right one"
+            confirm "    remove $p anyway?" || { say "left $p alone"; continue; }
+        else
+            printf '    no repo carries this package any more\n'
+            if ((!ASSUME_YES)); then
+                confirm "    remove $p?" || { say "left $p alone"; continue; }
+            fi
+        fi
+        todo+=("$p")
+        printf '%s\t%s\t%s\n' "$p" "$iv" "$(cached_file "$p" "$iv")" >>"$LOG"
+    done
+
+    ((${#todo[@]})) || die "nothing was removed, so the next round would repeat this one"
+
+    step "Removing ${todo[*]}"
+    sudo pacman -Rdd --noconfirm "${todo[@]}" || die "removal failed"
+    removed+=("${todo[@]}")
+done
+
+out=$(probe)
+if grep -q '^error:' <<<"$out"; then
+    grep -E '^(error|:: )' <<<"$out" | sed 's/^/    /'
+    die "still blocked after $MAX_ROUNDS rounds"
+fi
+
+step "Upgrading"
+sudo pacman -Su "${EXTRA[@]}" || die "upgrade failed; removals so far are listed in $LOG"
+
+step "Checking what the removals left behind"
+gaps=$(pacman -Dk 2>&1 | sed -nE 's/.*requires ([^ ><=]+).*/\1/p' | sort -u)
+
+if [[ -z $gaps ]]; then
+    say "no unmet dependencies"
+else
+    back=() lost=()
+    while IFS= read -r g; do
+        [[ -z $g ]] && continue
+        pacman -Qq "$g" &>/dev/null && continue
+        if pacman -Si "$g" &>/dev/null; then back+=("$g"); else lost+=("$g"); fi
+    done <<<"$gaps"
+
+    if ((${#back[@]})); then
+        step "Putting back ${back[*]}"
+        sudo pacman -S --asdeps --needed "${back[@]}" || die "reinstall failed"
+    fi
+
+    if ((${#lost[@]})); then
+        warn "no repo carries these, and something installed still asks for them: ${lost[*]}"
+    fi
+fi
+
+step "Result"
+pacman -Dk
+if ((${#removed[@]})); then
+    say "removed this run: ${removed[*]}"
+    say "each one, with its version and its cached package file, is in $LOG"
+fi
+
+if command -v yay >/dev/null; then
+    step "AUR"
+    yay -Su
+fi
