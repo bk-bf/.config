@@ -6,7 +6,7 @@ relevant; a markdown file is only read if someone goes looking for it.
 
 | Subject | Skill |
 |---|---|
-| Heat, battery, suspend, idle blanking, scx/VRR, workspace restore | `laptop-power` |
+| Heat, battery, suspend, idle blanking, CPU scheduler/VRR, workspace restore | `laptop-power` |
 | Speakers, touchpad/touchscreen, battery not detected, greeter scaling | `laptop-hardware` |
 | cgroup priority, memory pressure, leaked processes, session losses | `system-resources` |
 | This repo: `/etc` symlinks, package tracking, pacdim, Limine | `dotfiles` |
