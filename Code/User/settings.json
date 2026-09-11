@@ -234,4 +234,5 @@
   "window.openFilesInNewWindow": "on",
   "workbench.experimental.modernUI": false,
   "go.toolsManagement.autoUpdate": true,
+  "claudeCode.hideOnboarding": true,
 }
