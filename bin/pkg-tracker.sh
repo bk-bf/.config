@@ -46,6 +46,9 @@ pacman -Qqe > "$PKGLIST"
 git add "$PKGLIST"
 if ! git diff --cached --quiet -- "$PKGLIST"; then
     git commit -q -m "chore: update pkglist for $TS_HOST ($(date '+%Y-%m-%d %H:%M'))"
+fi
+
+if [ "$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 1)" -gt 0 ]; then
     git pull --rebase --autostash -q 2>/dev/null
     git push -q || echo "pkg-tracker: push failed (will retry next run)" >&2
 fi
