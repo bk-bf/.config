@@ -42,19 +42,6 @@ set_profile() {
     fi
 }
 
-notify() {
-    local title=$1 body=$2 icon=$3 bus uid
-    log "notify: $title: $body"
-    [[ $DRY_RUN == 1 ]] && return 0
-    for bus in /run/user/*/bus; do
-        [[ -S $bus ]] || continue
-        uid=${bus#/run/user/}
-        uid=${uid%/bus}
-        runuser -u "$(id -nu "$uid")" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
-            notify-send -a Power -i "$icon" "$title" "$body" || true
-    done
-}
-
 samples=()
 
 mean_last() {
@@ -113,8 +100,8 @@ while sleep 1; do
             seen=performance
             auto=1
             switched_at=$t
+            log "performance: package held $(( up / 1000 )) W for ${UP_WINDOW_S} s"
             assert_limits performance
-            notify "Performance mode" "Package held $(( up / 1000 )) W for ${UP_WINDOW_S} s. Limit 28 W, burst 45 W." power-profile-performance-symbolic
         fi
     elif [[ $profile == performance ]] && (( auto == 1 && since >= MIN_PERFORMANCE_S )); then
         down=$(mean_last "$DOWN_WINDOW_S")
@@ -123,8 +110,8 @@ while sleep 1; do
             seen=balanced
             auto=0
             switched_at=$t
+            log "balanced: package under $(( DOWN_MW / 1000 )) W for ${DOWN_WINDOW_S} s"
             assert_limits balanced
-            notify "Balanced mode" "Package under $(( DOWN_MW / 1000 )) W for ${DOWN_WINDOW_S} s. Limit 15 W, burst 25 W." power-profile-balanced-symbolic
         fi
     fi
 done
