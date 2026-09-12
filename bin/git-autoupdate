@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+ROOT="$HOME/Documents/local/Projects"
+SKIP=(noctalia kino)
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=15"
+
+getent hosts github.com >/dev/null || exit 0
+
+skipped() {
+  local name
+  for name in "${SKIP[@]}"; do [[ $1 == "$name" ]] && return 0; done
+  return 1
+}
+
+checkout_of() {
+  git -C "$1" worktree list --porcelain \
+    | awk -v ref="branch refs/heads/$2" '/^worktree /{wt=substr($0,10)} $0==ref{print wt; exit}'
+}
+
+advance() {
+  local repo=$1 branch=$2 upstream=$3 old new wt
+  old=$(git -C "$repo" rev-parse "refs/heads/$branch") || return
+  new=$(git -C "$repo" rev-parse "$upstream") || return
+  git -C "$repo" merge-base --is-ancestor "$old" "$new" || return
+  wt=$(checkout_of "$repo" "$branch")
+  if [[ -z $wt ]]; then
+    git -C "$repo" update-ref "refs/heads/$branch" "$new" "$old" || return
+  elif [[ -n $(git -C "$wt" status --porcelain --untracked-files=no) ]]; then
+    echo "$(basename "$repo") $branch: left behind, uncommitted changes in $wt"
+    return
+  else
+    git -C "$wt" merge --ff-only --quiet "$new" || return
+  fi
+  echo "$(basename "$repo") $branch: +$(git -C "$repo" rev-list --count "$old..$new") from ${upstream#refs/remotes/}"
+}
+
+failed=()
+for repo in "$ROOT"/*/; do
+  repo=${repo%/}
+  [[ -e $repo/.git ]] || continue
+  skipped "$(basename "$repo")" && continue
+  if ! timeout 120 git -C "$repo" fetch --all --prune --quiet; then
+    failed+=("$(basename "$repo")")
+    continue
+  fi
+  while IFS=$'\t' read -r branch upstream track; do
+    [[ $track =~ ^behind\ [0-9]+$ ]] && advance "$repo" "$branch" "$upstream"
+  done < <(git -C "$repo" for-each-ref --format='%(refname:short)%09%(upstream)%09%(upstream:track,nobracket)' refs/heads)
+done
+
+(( ${#failed[@]} == 0 )) || { echo "fetch failed: ${failed[*]}" >&2; exit 1; }

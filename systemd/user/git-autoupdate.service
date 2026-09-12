@@ -1,0 +1,8 @@
+[Unit]
+Description=Fetch every project repo and fast-forward the branches that are only behind
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.config/bin/git-autoupdate
