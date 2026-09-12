@@ -576,6 +576,7 @@
         "density": "compact",
         "enableBatteryToast": true,
         "enableKeyboardLayoutToast": true,
+        "enablePowerProfileToast": false,
         "enableMarkdown": false,
         "enableMediaToast": false,
         "enabled": true,
