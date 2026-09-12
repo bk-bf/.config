@@ -17,7 +17,7 @@ This repository contains my personal Linux configuration files for a Hyprland se
 - **Shell / Status Bar**: Noctalia (via QuickShell)
 - **Terminal**: Kitty
 - **Application Launcher**: Noctalia launcher
-- **File Manager**: Nautilus
+- **File Manager**: Nemo
 - **Screenshots**: Grim + Slurp
 - **Idle / Sleep**: hypridle
 - **Wallpaper**: hyprpaper
@@ -35,7 +35,7 @@ This repository contains my personal Linux configuration files for a Hyprland se
 - **Super + C**: Clipboard history (Noctalia)
 - **Super + Q**: Close window
 - **Super + Shift + Space**: Toggle floating
-- **Super + N**: File manager (Nautilus)
+- **Super + N**: File manager (Nemo)
 - **Super + 1–0**: Switch workspaces
 - **Super + Shift + 1–0**: Move window to workspace
 - **Super + R**: Enter resize mode (then vim/arrow keys; Escape/Enter to exit)
@@ -142,7 +142,8 @@ wl-clipboard              # wl-paste (clipboard daemon)
 
 ### Desktop Integration
 ```
-nautilus                  # File manager
+nemo                      # File manager
+nemo-fileroller           # Archive extract/compress in Nemo's context menu
 gnome-control-center      # Settings manager
 polkit-gnome              # Authentication agent (runs as systemd user service)
 gnome-keyring             # Credential management
