@@ -1,0 +1,130 @@
+#!/bin/bash
+
+set -euo pipefail
+
+RAPL=${POWER_AUTO_RAPL:-/sys/class/powercap/intel-rapl:0}
+PROFILE_FILE=${POWER_AUTO_PROFILE_FILE:-/sys/firmware/acpi/platform_profile}
+DRY_RUN=${POWER_AUTO_DRY_RUN:-0}
+UP_MW=$(( ${POWER_AUTO_UP_W:-14} * 1000 ))
+UP_WINDOW_S=${POWER_AUTO_UP_WINDOW_S:-20}
+DOWN_MW=$(( ${POWER_AUTO_DOWN_W:-12} * 1000 ))
+DOWN_WINDOW_S=${POWER_AUTO_DOWN_WINDOW_S:-120}
+MIN_PERFORMANCE_S=${POWER_AUTO_MIN_PERFORMANCE_S:-180}
+MIN_BALANCED_S=${POWER_AUTO_MIN_BALANCED_S:-60}
+RESUME_GAP_MS=5000
+
+declare -A PL1_UW=([performance]=28000000 [balanced]=15000000)
+declare -A PL2_UW=([performance]=45000000 [balanced]=25000000)
+
+log() { printf '%s\n' "$*"; }
+
+now_ms() {
+    local t=${EPOCHREALTIME/,/.}
+    echo $(( ${t%.*} * 1000 + 10#${t#*.} / 1000 ))
+}
+
+assert_limits() {
+    local key=balanced
+    [[ $1 == performance ]] && key=performance
+    local pl1=${PL1_UW[$key]} pl2=${PL2_UW[$key]}
+    if [[ $(<"$RAPL/constraint_0_power_limit_uw") != "$pl1" || $(<"$RAPL/constraint_1_power_limit_uw") != "$pl2" ]]; then
+        echo "$pl1" > "$RAPL/constraint_0_power_limit_uw"
+        echo "$pl2" > "$RAPL/constraint_1_power_limit_uw"
+        log "limits for $1: PL1 $(( pl1 / 1000000 )) W, PL2 $(( pl2 / 1000000 )) W"
+    fi
+}
+
+set_profile() {
+    if [[ $DRY_RUN == 1 ]]; then
+        echo "$1" > "$PROFILE_FILE"
+    else
+        powerprofilesctl set "$1"
+    fi
+}
+
+notify() {
+    local title=$1 body=$2 icon=$3 bus uid
+    log "notify: $title: $body"
+    [[ $DRY_RUN == 1 ]] && return 0
+    for bus in /run/user/*/bus; do
+        [[ -S $bus ]] || continue
+        uid=${bus#/run/user/}
+        uid=${uid%/bus}
+        runuser -u "$(id -nu "$uid")" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+            notify-send -a Power -i "$icon" "$title" "$body" || true
+    done
+}
+
+samples=()
+
+mean_last() {
+    local n=$1 c=${#samples[@]} s=0 i
+    if (( c < n )); then
+        echo -1
+        return
+    fi
+    for (( i = c - n; i < c; i++ )); do
+        s=$(( s + samples[i] ))
+    done
+    echo $(( s / n ))
+}
+
+keep=$(( UP_WINDOW_S > DOWN_WINDOW_S ? UP_WINDOW_S : DOWN_WINDOW_S ))
+max_range=$(<"$RAPL/max_energy_range_uj")
+prev_e=$(<"$RAPL/energy_uj")
+prev_t=$(now_ms)
+seen=$(<"$PROFILE_FILE")
+switched_at=$prev_t
+auto=0
+
+log "up at $(( UP_MW / 1000 )) W over ${UP_WINDOW_S} s, down under $(( DOWN_MW / 1000 )) W over ${DOWN_WINDOW_S} s, profile $seen"
+assert_limits "$seen"
+
+while sleep 1; do
+    e=$(<"$RAPL/energy_uj")
+    t=$(now_ms)
+    d=$(( e - prev_e ))
+    (( d < 0 )) && d=$(( d + max_range ))
+    dt=$(( t - prev_t ))
+    prev_e=$e
+    prev_t=$t
+    (( dt > 0 )) || continue
+    profile=$(<"$PROFILE_FILE")
+    if (( dt > RESUME_GAP_MS )); then
+        log "gap of ${dt} ms, re-applying limits for $profile"
+        samples=()
+        assert_limits "$profile"
+        continue
+    fi
+    samples+=("$(( d / dt ))")
+    (( ${#samples[@]} > keep )) && samples=("${samples[@]:1}")
+    if [[ $profile != "$seen" ]]; then
+        log "profile changed outside power-auto: $seen -> $profile"
+        seen=$profile
+        auto=0
+        switched_at=$t
+        assert_limits "$profile"
+    fi
+    since=$(( (t - switched_at) / 1000 ))
+    if [[ $profile == balanced ]] && (( since >= MIN_BALANCED_S )); then
+        up=$(mean_last "$UP_WINDOW_S")
+        if (( up >= UP_MW )); then
+            set_profile performance
+            seen=performance
+            auto=1
+            switched_at=$t
+            assert_limits performance
+            notify "Performance mode" "Package held $(( up / 1000 )) W for ${UP_WINDOW_S} s. Limit 28 W, burst 45 W." power-profile-performance-symbolic
+        fi
+    elif [[ $profile == performance ]] && (( auto == 1 && since >= MIN_PERFORMANCE_S )); then
+        down=$(mean_last "$DOWN_WINDOW_S")
+        if (( down >= 0 && down < DOWN_MW )); then
+            set_profile balanced
+            seen=balanced
+            auto=0
+            switched_at=$t
+            assert_limits balanced
+            notify "Balanced mode" "Package under $(( DOWN_MW / 1000 )) W for ${DOWN_WINDOW_S} s. Limit 15 W, burst 25 W." power-profile-balanced-symbolic
+        fi
+    fi
+done

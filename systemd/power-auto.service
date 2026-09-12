@@ -1,0 +1,11 @@
+[Unit]
+Description=Switch between balanced and performance power limits on sustained package power
+After=power-profiles-daemon.service intel-undervolt.service
+
+[Service]
+ExecStart=/usr/local/bin/power-auto
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

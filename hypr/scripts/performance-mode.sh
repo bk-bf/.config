@@ -36,7 +36,7 @@ case "$MODE" in
         apply_intel_undervolt "$CONF_DIR/intel-undervolt-balanced.conf"
         apply_governor powersave
         notify-send -u low -i power-profile-balanced-symbolic \
-            "Balanced mode restored" "PL1=28W PL2=45W · governor=powersave"
+            "Balanced mode restored" "PL1=15W PL2=25W · governor=powersave"
         ;;
     *)
         echo "Usage: $0 [enable|disable]" >&2
