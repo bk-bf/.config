@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+import array
+import fcntl
+import os
+import re
+import struct
+import sys
+import time
+
+TOUCHPAD_NAME = "ZNT0001:00 14E5:650E Touchpad"
+EV_SYN, EV_ABS = 0, 3
+SYN_REPORT = 0
+ABS_MT_SLOT, ABS_MT_TOOL_TYPE, ABS_MT_TRACKING_ID = 0x2F, 0x37, 0x39
+MT_TOOL_FINGER, MT_TOOL_PALM = 0, 2
+IDLE_WAIT_S = 5.0
+
+
+def ioc_read(nr, size):
+    return (2 << 30) | (size << 16) | (ord("E") << 8) | nr
+
+
+def find_node():
+    for block in open("/proc/bus/input/devices").read().split("\n\n"):
+        if f'N: Name="{TOUCHPAD_NAME}"' in block:
+            return "/dev/input/" + re.search(r"\b(event\d+)\b", block).group(1)
+    sys.exit(f"touchpad-unstick: {TOUCHPAD_NAME} not found")
+
+
+def absinfo(fd, code):
+    buf = bytearray(24)
+    fcntl.ioctl(fd, ioc_read(0x40 + code, 24), buf)
+    return struct.unpack("6i", buf)
+
+
+def slot_values(fd, code, count):
+    arr = array.array("i", [code] + [0] * count)
+    fcntl.ioctl(fd, ioc_read(0x0A, 4 * (count + 1)), arr)
+    return list(arr[1:])
+
+
+def event(etype, code, value):
+    return struct.pack("qqHHi", 0, 0, etype, code, value)
+
+
+def main():
+    node = find_node()
+    fd = os.open(node, os.O_RDWR)
+    slots = absinfo(fd, ABS_MT_SLOT)[2] + 1
+
+    deadline = time.monotonic() + IDLE_WAIT_S
+    while any(t != -1 for t in slot_values(fd, ABS_MT_TRACKING_ID, slots)):
+        if time.monotonic() > deadline:
+            sys.exit(f"touchpad-unstick: {node} still touched after {IDLE_WAIT_S:.0f}s, left alone")
+        time.sleep(0.1)
+
+    before = slot_values(fd, ABS_MT_TOOL_TYPE, slots)
+    current_slot = absinfo(fd, ABS_MT_SLOT)[0]
+    frames = b""
+    for tool in (MT_TOOL_PALM, MT_TOOL_FINGER):
+        for slot in range(slots):
+            frames += event(EV_ABS, ABS_MT_SLOT, slot) + event(EV_ABS, ABS_MT_TOOL_TYPE, tool)
+        frames += event(EV_SYN, SYN_REPORT, 0)
+    frames += event(EV_ABS, ABS_MT_SLOT, current_slot) + event(EV_SYN, SYN_REPORT, 0)
+    os.write(fd, frames)
+    os.close(fd)
+    print(f"touchpad-unstick: {node} tool type per slot was {before}, cycled palm->finger on {slots} slots")
+
+
+if __name__ == "__main__":
+    main()
