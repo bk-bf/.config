@@ -19,7 +19,8 @@
   "ignore_subjects": [
     "watcher*",
     "app-*.scope",
-    "app-com.github.wwmm.easyeffects@autostart.service"
+    "app-com.github.wwmm.easyeffects@autostart.service",
+    "cachyos-rate-mirrors.service"
   ],
   "context": [
     {
