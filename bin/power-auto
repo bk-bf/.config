@@ -11,6 +11,8 @@ DOWN_MW=$(( ${POWER_AUTO_DOWN_W:-12} * 1000 ))
 DOWN_WINDOW_S=${POWER_AUTO_DOWN_WINDOW_S:-120}
 MIN_PERFORMANCE_S=${POWER_AUTO_MIN_PERFORMANCE_S:-180}
 MIN_BALANCED_S=${POWER_AUTO_MIN_BALANCED_S:-60}
+REASSERT_AFTER_RESUME_S=${POWER_AUTO_REASSERT_AFTER_RESUME_S:-60}
+STATUS_EVERY_S=${POWER_AUTO_STATUS_EVERY_S:-600}
 RESUME_GAP_MS=5000
 
 declare -A PL1_UW=([performance]=28000000 [balanced]=15000000)
@@ -23,14 +25,35 @@ now_ms() {
     echo $(( ${t%.*} * 1000 + 10#${t#*.} / 1000 ))
 }
 
+limits_key() {
+    if [[ $1 == performance ]]; then echo performance; else echo balanced; fi
+}
+
+current_limits() {
+    echo "$(<"$RAPL/constraint_0_power_limit_uw") $(<"$RAPL/constraint_1_power_limit_uw")"
+}
+
+foreign=""
+
 assert_limits() {
-    local key=balanced
-    [[ $1 == performance ]] && key=performance
-    local pl1=${PL1_UW[$key]} pl2=${PL2_UW[$key]}
-    if [[ $(<"$RAPL/constraint_0_power_limit_uw") != "$pl1" || $(<"$RAPL/constraint_1_power_limit_uw") != "$pl2" ]]; then
-        echo "$pl1" > "$RAPL/constraint_0_power_limit_uw"
-        echo "$pl2" > "$RAPL/constraint_1_power_limit_uw"
-        log "limits for $1: PL1 $(( pl1 / 1000000 )) W, PL2 $(( pl2 / 1000000 )) W"
+    local key
+    key=$(limits_key "$1")
+    if [[ $(current_limits) != "${PL1_UW[$key]} ${PL2_UW[$key]}" ]]; then
+        echo "${PL1_UW[$key]}" > "$RAPL/constraint_0_power_limit_uw"
+        echo "${PL2_UW[$key]}" > "$RAPL/constraint_1_power_limit_uw"
+        log "limits for $1: PL1 $(( PL1_UW[$key] / 1000000 )) W, PL2 $(( PL2_UW[$key] / 1000000 )) W"
+    fi
+    foreign=""
+}
+
+watch_limits() {
+    local key have pl1 pl2
+    key=$(limits_key "$1")
+    have=$(current_limits)
+    if [[ $have != "${PL1_UW[$key]} ${PL2_UW[$key]}" && $have != "$foreign" ]]; then
+        foreign=$have
+        read -r pl1 pl2 <<<"$have"
+        log "limits changed outside power-auto in $1: PL1 $(( pl1 / 1000000 )) W, PL2 $(( pl2 / 1000000 )) W"
     fi
 }
 
@@ -56,13 +79,20 @@ mean_last() {
     echo $(( s / n ))
 }
 
+mean_text() {
+    local m
+    m=$(mean_last "$1")
+    if (( m < 0 )); then echo "no data"; else echo "$(( m / 1000 )) W"; fi
+}
+
 keep=$(( UP_WINDOW_S > DOWN_WINDOW_S ? UP_WINDOW_S : DOWN_WINDOW_S ))
 max_range=$(<"$RAPL/max_energy_range_uj")
 prev_e=$(<"$RAPL/energy_uj")
 prev_t=$(now_ms)
 seen=$(<"$PROFILE_FILE")
 switched_at=$prev_t
-auto=0
+status_at=$prev_t
+reassert_at=0
 
 log "up at $(( UP_MW / 1000 )) W over ${UP_WINDOW_S} s, down under $(( DOWN_MW / 1000 )) W over ${DOWN_WINDOW_S} s, profile $seen"
 assert_limits "$seen"
@@ -78,9 +108,10 @@ while sleep 1; do
     (( dt > 0 )) || continue
     profile=$(<"$PROFILE_FILE")
     if (( dt > RESUME_GAP_MS )); then
-        log "gap of ${dt} ms, re-applying limits for $profile"
+        log "resumed after ${dt} ms in $profile"
         samples=()
         assert_limits "$profile"
+        reassert_at=$(( t + REASSERT_AFTER_RESUME_S * 1000 ))
         continue
     fi
     samples+=("$(( d / dt ))")
@@ -88,27 +119,33 @@ while sleep 1; do
     if [[ $profile != "$seen" ]]; then
         log "profile changed outside power-auto: $seen -> $profile"
         seen=$profile
-        auto=0
         switched_at=$t
         assert_limits "$profile"
     fi
+    if (( reassert_at > 0 && t >= reassert_at )); then
+        reassert_at=0
+        assert_limits "$profile"
+    fi
+    watch_limits "$profile"
     since=$(( (t - switched_at) / 1000 ))
+    if (( t - status_at >= STATUS_EVERY_S * 1000 )); then
+        status_at=$t
+        log "status: $profile for ${since} s, ${UP_WINDOW_S} s mean $(mean_text "$UP_WINDOW_S"), ${DOWN_WINDOW_S} s mean $(mean_text "$DOWN_WINDOW_S")"
+    fi
     if [[ $profile == balanced ]] && (( since >= MIN_BALANCED_S )); then
         up=$(mean_last "$UP_WINDOW_S")
         if (( up >= UP_MW )); then
             set_profile performance
             seen=performance
-            auto=1
             switched_at=$t
             log "performance: package held $(( up / 1000 )) W for ${UP_WINDOW_S} s"
             assert_limits performance
         fi
-    elif [[ $profile == performance ]] && (( auto == 1 && since >= MIN_PERFORMANCE_S )); then
+    elif [[ $profile == performance ]] && (( since >= MIN_PERFORMANCE_S )); then
         down=$(mean_last "$DOWN_WINDOW_S")
         if (( down >= 0 && down < DOWN_MW )); then
             set_profile balanced
             seen=balanced
-            auto=0
             switched_at=$t
             log "balanced: package under $(( DOWN_MW / 1000 )) W for ${DOWN_WINDOW_S} s"
             assert_limits balanced
