@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+import json
+import os
+import socket
+import subprocess
+import threading
+
+AC_ONLINE = os.environ.get("REFRESH_ON_POWER_AC_ONLINE", "/sys/class/power_supply/ADP1/online")
+AC_HZ = int(os.environ.get("REFRESH_ON_POWER_AC_HZ", "120"))
+BATTERY_HZ = int(os.environ.get("REFRESH_ON_POWER_BATTERY_HZ", "60"))
+
+lock = threading.Lock()
+last_online = None
+
+
+def log(message):
+    print(message, flush=True)
+
+
+def hyprctl(*args):
+    return subprocess.run(["hyprctl", *args], capture_output=True, text=True, check=True).stdout
+
+
+def on_ac():
+    with open(AC_ONLINE) as f:
+        return f.read().strip() == "1"
+
+
+def apply(force):
+    global last_online
+    with lock:
+        online = on_ac()
+        if not force and online == last_online:
+            return
+        last_online = online
+        want = AC_HZ if online else BATTERY_HZ
+        for m in json.loads(hyprctl("monitors", "-j")):
+            if not m["name"].startswith("eDP") or round(m["refreshRate"]) == want:
+                continue
+            spec = f'{m["name"]},{m["width"]}x{m["height"]}@{want},{m["x"]}x{m["y"]},{m["scale"]:g}'
+            if m["transform"]:
+                spec += f',transform,{m["transform"]}'
+            hyprctl("keyword", "monitor", spec)
+            log(f'{"ac" if online else "battery"}: {spec}')
+
+
+def run(force):
+    try:
+        apply(force)
+    except (OSError, ValueError, subprocess.CalledProcessError) as e:
+        log(f"could not apply: {e}")
+
+
+def watch_power():
+    with subprocess.Popen(
+        ["udevadm", "monitor", "--udev", "--subsystem-match=power_supply"],
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as p:
+        for line in p.stdout:
+            if "(power_supply)" in line:
+                run(False)
+    log("udevadm monitor exited")
+    os._exit(1)
+
+
+def watch_hyprland():
+    path = f'{os.environ["XDG_RUNTIME_DIR"]}/hypr/{os.environ["HYPRLAND_INSTANCE_SIGNATURE"]}/.socket2.sock'
+    with socket.socket(socket.AF_UNIX) as s:
+        s.connect(path)
+        for line in s.makefile("r"):
+            if line.startswith(("configreloaded>>", "monitoradded>>")):
+                run(True)
+    log("hyprland event socket closed")
+    os._exit(1)
+
+
+threading.Thread(target=watch_power, daemon=True).start()
+run(True)
+watch_hyprland()
