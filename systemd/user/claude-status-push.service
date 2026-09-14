@@ -13,5 +13,5 @@ MemoryMax=256M
 CPUWeight=20
 IOWeight=20
 Nice=15
-TimeoutStartSec=90
+TimeoutStartSec=150
 SuccessExitStatus=0 1
