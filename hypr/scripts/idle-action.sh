@@ -37,10 +37,6 @@ case "$MODE" in
         ;;
     before-sleep)
         logger -t idle-action "before-sleep: start"
-        if has_fullscreen_window; then
-            logger -t idle-action "before-sleep: fullscreen window, not locking"
-            exit 0
-        fi
         qs -c noctalia-shell ipc call lockScreen lock
         logger -t idle-action "before-sleep: lock call returned $?"
         sleep 1
