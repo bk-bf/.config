@@ -1,6 +1,6 @@
 [Unit]
 Description=Switch between balanced and performance power limits on sustained package power
-After=power-profiles-daemon.service intel-undervolt.service
+After=power-profiles-daemon.service
 
 [Service]
 ExecStart=/usr/local/bin/power-auto
