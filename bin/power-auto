@@ -4,6 +4,9 @@ set -euo pipefail
 
 RAPL=${POWER_AUTO_RAPL:-/sys/class/powercap/intel-rapl:0}
 PROFILE_FILE=${POWER_AUTO_PROFILE_FILE:-/sys/firmware/acpi/platform_profile}
+BATTERY=${POWER_AUTO_BATTERY:-/sys/class/power_supply/BAT1}
+AC_ONLINE=${POWER_AUTO_AC_ONLINE:-/sys/class/power_supply/ADP1/online}
+BACKLIGHT=${POWER_AUTO_BACKLIGHT:-/sys/class/backlight/intel_backlight}
 DRY_RUN=${POWER_AUTO_DRY_RUN:-0}
 UP_MW=$(( ${POWER_AUTO_UP_W:-14} * 1000 ))
 UP_WINDOW_S=${POWER_AUTO_UP_WINDOW_S:-20}
@@ -11,12 +14,15 @@ DOWN_MW=$(( ${POWER_AUTO_DOWN_W:-12} * 1000 ))
 DOWN_WINDOW_S=${POWER_AUTO_DOWN_WINDOW_S:-120}
 MIN_PERFORMANCE_S=${POWER_AUTO_MIN_PERFORMANCE_S:-180}
 MIN_BALANCED_S=${POWER_AUTO_MIN_BALANCED_S:-60}
+SAVER_BATTERY_BELOW_PCT=${POWER_AUTO_SAVER_BATTERY_BELOW_PCT:-30}
+SAVER_BRIGHTNESS_BELOW_PCT=${POWER_AUTO_SAVER_BRIGHTNESS_BELOW_PCT:-50}
 REASSERT_AFTER_RESUME_S=${POWER_AUTO_REASSERT_AFTER_RESUME_S:-60}
 STATUS_EVERY_S=${POWER_AUTO_STATUS_EVERY_S:-600}
 RESUME_GAP_MS=5000
 
 declare -A PL1_UW=([performance]=28000000 [balanced]=15000000)
 declare -A PL2_UW=([performance]=45000000 [balanced]=25000000)
+declare -A PPD_NAME=([low-power]=power-saver [balanced]=balanced [performance]=performance)
 
 log() { printf '%s\n' "$*"; }
 
@@ -61,7 +67,31 @@ set_profile() {
     if [[ $DRY_RUN == 1 ]]; then
         echo "$1" > "$PROFILE_FILE"
     else
-        powerprofilesctl set "$1"
+        powerprofilesctl set "${PPD_NAME[$1]}"
+    fi
+}
+
+ac=1
+capacity=100
+brightness=100
+rest=balanced
+
+read_power_source() {
+    local now max
+    ac=1
+    capacity=100
+    brightness=100
+    [[ -r $AC_ONLINE ]] && ac=$(<"$AC_ONLINE")
+    [[ -r $BATTERY/capacity ]] && capacity=$(<"$BATTERY/capacity")
+    if [[ -r $BACKLIGHT/brightness && -r $BACKLIGHT/max_brightness ]]; then
+        now=$(<"$BACKLIGHT/brightness")
+        max=$(<"$BACKLIGHT/max_brightness")
+        (( max > 0 )) && brightness=$(( now * 100 / max ))
+    fi
+    if [[ $ac == 0 ]] && (( capacity < SAVER_BATTERY_BELOW_PCT )) || (( brightness < SAVER_BRIGHTNESS_BELOW_PCT )); then
+        rest=low-power
+    else
+        rest=balanced
     fi
 }
 
@@ -93,8 +123,9 @@ seen=$(<"$PROFILE_FILE")
 switched_at=$prev_t
 status_at=$prev_t
 reassert_at=0
+resting=""
 
-log "up at $(( UP_MW / 1000 )) W over ${UP_WINDOW_S} s, down under $(( DOWN_MW / 1000 )) W over ${DOWN_WINDOW_S} s, profile $seen"
+log "up at $(( UP_MW / 1000 )) W over ${UP_WINDOW_S} s, down under $(( DOWN_MW / 1000 )) W over ${DOWN_WINDOW_S} s, power-saver under ${SAVER_BATTERY_BELOW_PCT} % battery on battery or under ${SAVER_BRIGHTNESS_BELOW_PCT} % brightness, profile $seen"
 assert_limits "$seen"
 
 while sleep 1; do
@@ -122,6 +153,18 @@ while sleep 1; do
         switched_at=$t
         assert_limits "$profile"
     fi
+    read_power_source
+    if [[ $rest != "$resting" ]]; then
+        if [[ ($profile == balanced || $profile == low-power) && $profile != "$rest" ]]; then
+            set_profile "$rest"
+            profile=$rest
+            seen=$rest
+            switched_at=$t
+            log "$rest: battery ${capacity} %, AC online $ac, brightness ${brightness} %"
+            assert_limits "$rest"
+        fi
+        resting=$rest
+    fi
     if (( reassert_at > 0 && t >= reassert_at )); then
         reassert_at=0
         assert_limits "$profile"
@@ -130,9 +173,9 @@ while sleep 1; do
     since=$(( (t - switched_at) / 1000 ))
     if (( t - status_at >= STATUS_EVERY_S * 1000 )); then
         status_at=$t
-        log "status: $profile for ${since} s, ${UP_WINDOW_S} s mean $(mean_text "$UP_WINDOW_S"), ${DOWN_WINDOW_S} s mean $(mean_text "$DOWN_WINDOW_S")"
+        log "status: $profile for ${since} s, resting $resting, battery ${capacity} %, AC online $ac, brightness ${brightness} %, ${UP_WINDOW_S} s mean $(mean_text "$UP_WINDOW_S"), ${DOWN_WINDOW_S} s mean $(mean_text "$DOWN_WINDOW_S")"
     fi
-    if [[ $profile == balanced ]] && (( since >= MIN_BALANCED_S )); then
+    if [[ $profile == balanced || $profile == low-power ]] && (( since >= MIN_BALANCED_S )); then
         up=$(mean_last "$UP_WINDOW_S")
         if (( up >= UP_MW )); then
             set_profile performance
@@ -144,11 +187,11 @@ while sleep 1; do
     elif [[ $profile == performance ]] && (( since >= MIN_PERFORMANCE_S )); then
         down=$(mean_last "$DOWN_WINDOW_S")
         if (( down >= 0 && down < DOWN_MW )); then
-            set_profile balanced
-            seen=balanced
+            set_profile "$resting"
+            seen=$resting
             switched_at=$t
-            log "balanced: package under $(( DOWN_MW / 1000 )) W for ${DOWN_WINDOW_S} s"
-            assert_limits balanced
+            log "$resting: package under $(( DOWN_MW / 1000 )) W for ${DOWN_WINDOW_S} s"
+            assert_limits "$resting"
         fi
     fi
 done
