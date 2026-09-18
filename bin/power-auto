@@ -104,6 +104,37 @@ lid_is_closed() {
     [[ -r $LID_STATE && $(<"$LID_STATE") == *closed* ]]
 }
 
+lid_switch_state() {
+    python3 - <<'LIDPY' 2>/dev/null || echo unknown
+import fcntl, array, glob, os
+EVIOCGSW = (2 << 30) | (8 << 16) | (0x45 << 8) | 0x1b
+for dev in sorted(glob.glob('/dev/input/event*')):
+    try:
+        name = open('/sys/class/input/%s/device/name' % os.path.basename(dev)).read().strip()
+    except OSError:
+        continue
+    if name != 'Lid Switch':
+        continue
+    buf = array.array('B', [0] * 8)
+    try:
+        with open(dev, 'rb') as fd:
+            fcntl.ioctl(fd, EVIOCGSW, buf, True)
+    except OSError:
+        print('unknown')
+        break
+    print('closed' if buf[0] & 1 else 'open')
+    break
+else:
+    print('unknown')
+LIDPY
+}
+
+lid_state_text() {
+    local acpi=unknown
+    [[ -r $LID_STATE ]] && acpi=$(awk '{print $2}' "$LID_STATE")
+    echo "acpi=$acpi switch=$(lid_switch_state)"
+}
+
 logind_prop() {
     busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager "$1" 2>/dev/null \
         | sed -E 's/^[a-z] "?([^"]*)"?$/\1/' || true
@@ -251,7 +282,7 @@ while sleep 1; do
     since=$(( (t - switched_at) / 1000 ))
     if (( t - status_at >= STATUS_EVERY_S * 1000 )); then
         status_at=$t
-        log "status: $profile for ${since} s, resting $resting, battery ${capacity} %, AC online $ac, brightness ${brightness} %, ${UP_WINDOW_S} s mean $(mean_text "$UP_WINDOW_S"), ${DOWN_WINDOW_S} s mean $(mean_text "$DOWN_WINDOW_S")"
+        log "status: $profile for ${since} s, resting $resting, battery ${capacity} %, AC online $ac, brightness ${brightness} %, lid $(lid_state_text), ${UP_WINDOW_S} s mean $(mean_text "$UP_WINDOW_S"), ${DOWN_WINDOW_S} s mean $(mean_text "$DOWN_WINDOW_S")"
     fi
     if [[ $profile == balanced || $profile == low-power ]] && (( since >= MIN_BALANCED_S )); then
         up=$(mean_last "$UP_WINDOW_S")

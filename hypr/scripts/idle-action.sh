@@ -2,38 +2,45 @@
 
 MODE=${1:-}
 
-has_fullscreen_window() {
+fullscreen_windows() {
     hyprctl clients -j 2>/dev/null | python3 -c \
-        "import sys,json; clients=json.load(sys.stdin); exit(0 if any(c.get('fullscreen') for c in clients) else 1)" \
+        "import sys,json;print(','.join((c.get('class') or '?')+':'+(c.get('title') or '')[:40] for c in json.load(sys.stdin) if c.get('fullscreen')))" \
         2>/dev/null
 }
 
-has_active_audio() {
-    pactl list sink-inputs 2>/dev/null | grep -q "State: RUNNING"
+audio_by_state() {
+    pactl -f json list sink-inputs 2>/dev/null | python3 -c \
+        "import sys,json;want='$1';d=json.load(sys.stdin);print(','.join((i.get('properties',{}).get('application.name') or '?')+':'+(i.get('state') or '?') for i in d if ((i.get('state') or '').upper()=='RUNNING')==(want=='running')))" \
+        2>/dev/null
 }
 
-should_skip_media_idle_action() {
-    has_fullscreen_window || has_active_audio
+lid_state() {
+    awk '{print $2}' /proc/acpi/button/lid/LID0/state 2>/dev/null
+}
+
+run_or_skip() {
+    local mode=$1 fs running other lid
+    fs=$(fullscreen_windows)
+    running=$(audio_by_state running)
+    other=$(audio_by_state other)
+    lid=$(lid_state)
+    if [[ -n $fs || -n $running ]]; then
+        logger -t idle-action "$mode: skipped; fullscreen=[$fs]; audio_running=[$running]; audio_idle=[$other]; lid=$lid"
+        return 1
+    fi
+    logger -t idle-action "$mode: running; fullscreen=[]; audio_running=[]; audio_idle=[$other]; lid=$lid"
+    return 0
 }
 
 case "$MODE" in
     screen-off)
-        if should_skip_media_idle_action; then
-            exit 0
-        fi
-        hyprctl dispatch dpms off
+        run_or_skip screen-off && hyprctl dispatch dpms off
         ;;
     lock)
-        if should_skip_media_idle_action; then
-            exit 0
-        fi
-        loginctl lock-session
+        run_or_skip lock && loginctl lock-session
         ;;
     suspend)
-        if should_skip_media_idle_action; then
-            exit 0
-        fi
-        systemctl suspend
+        run_or_skip suspend && systemctl suspend
         ;;
     before-sleep)
         logger -t idle-action "before-sleep: start"
