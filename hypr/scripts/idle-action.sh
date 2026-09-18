@@ -25,6 +25,35 @@ lid_state() {
     awk '{print $2}' /proc/acpi/button/lid/LID0/state 2>/dev/null
 }
 
+lid_switch_state() {
+    python3 - <<'LIDPY' 2>/dev/null || echo unknown
+import fcntl, array, glob, os
+EVIOCGSW = (2 << 30) | (8 << 16) | (0x45 << 8) | 0x1b
+for dev in sorted(glob.glob('/dev/input/event*')):
+    try:
+        name = open('/sys/class/input/%s/device/name' % os.path.basename(dev)).read().strip()
+    except OSError:
+        continue
+    if name != 'Lid Switch':
+        continue
+    buf = array.array('B', [0] * 8)
+    try:
+        with open(dev, 'rb') as fd:
+            fcntl.ioctl(fd, EVIOCGSW, buf, True)
+    except OSError:
+        print('unknown')
+        break
+    print('closed' if buf[0] & 1 else 'open')
+    break
+else:
+    print('unknown')
+LIDPY
+}
+
+lid_is_closed() {
+    [[ $(lid_state) == closed || $(lid_switch_state) == closed ]]
+}
+
 do_suspend() {
     local why=$1
     log "suspend: $why; audio=[$(audio_by_state playing)]; fullscreen=[$(fullscreen_windows)]; lid=$(lid_state)"
@@ -90,8 +119,17 @@ audio_timer() {
 }
 
 lid_timer() {
+    local waited=0
     claim_timer lid-wait
-    sleep "$LID_S"
+    while (( waited < LID_S )); do
+        sleep 5
+        waited=$(( waited + 5 ))
+        if ! lid_is_closed; then
+            release_timer lid-wait
+            log "lid-wait: lid reads open after ${waited} s, not suspending"
+            return
+        fi
+    done
     release_timer lid-wait
     do_suspend "lid closed for ${LID_S} s"
 }
@@ -125,6 +163,10 @@ case "$MODE" in
         stop_timer audio-wait
         ;;
     lid-closed)
+        if ! lid_is_closed; then
+            log "lid-closed: ignored, lid reads acpi=$(lid_state) switch=$(lid_switch_state)"
+            exit 0
+        fi
         log "lid-wait: lid closed, suspending in ${LID_S} s"
         start_timer lid-wait
         ;;
