@@ -8,6 +8,8 @@ Instructions for AI agents (OpenCode, etc.) working in this repository.
 
 - **Never work blind — see the output before calling it done.** For anything with observable output, and *especially* any UI/frontend work, set up a feedback loop **first** and check every change against it — not at the end. For web UI: a running dev server plus screenshots you actually view (headless `firefox --screenshot <url>` for static states; a Playwright script for states behind interaction — filled, loading, error), compared against the target look before declaring it finished. Check both light and dark. Before building tooling from scratch, look for an existing skill, CLI, or library that already does the job. Shipping UI I have never looked at — the exact failure that has wasted your time before — is what this rule exists to prevent. Mechanics: the `visual-dev` skill.
 
+- **Research online in parallel with reading the code — not instead of it, and not after it.** For any error message, crash signature, misbehaving mod or library, or "why does X do Y", issue the web search and start the local investigation in the same batch, then let whichever returns first narrow the other. A known upstream defect with a published workaround is the common case, and re-deriving one from logs, file trees and version history is slower and easy to get wrong. **Litmus test: if the symptom could plausibly have been hit by someone else, it has a search query — run it before the third local tool call.** Put the real error text, the exact version and the platform into the query; platform-specific defects, native Linux builds especially, are often the answer.
+
 - **No breadcrumbs. Never end a message with work.** The last thing you say is what the task *is*, not what is left. That means: no commands for me to run, no "needs your password", no leftovers you noticed, no unrelated cruft you spotted in passing, no suggested next steps, no follow-up questions. Not even flagged as "this one's yours, not mine" — that is still a to-do list, and it still lands on me. **Litmus test: if I read only the last paragraph, does it give me a job? Then delete it.** Two consequences that are not optional: (1) if something blocks you — a sudo password, a login, a 2FA prompt — raise it **the moment it appears**, as one bundled ask, and stop; do not route around it, finish the other 90%, and present the remainder at the end. (2) Anything you create on my machines — a scratch file, a credentials file, a stopped container, a clipboard entry — you remove in the same turn. Made it, own it.
 
 ## Rules
@@ -17,6 +19,38 @@ Instructions for AI agents (OpenCode, etc.) working in this repository.
 - **Never create git worktrees** (`git worktree add`, EnterWorktree, or any auto-isolation) unless I explicitly ask for one. This is a dotfiles repo — the working copy *is* the live config, so edit files in place here. (Enforced for background jobs via `worktree.bgIsolation: "none"` in `.claude/settings.json`.)
 - **Never install packages** or run `yay`/`pacman` unless explicitly asked.
 - **Never run `hyprctl reload`** or restart services unless explicitly asked — this is a live desktop.
+
+## Memory frontmatter
+
+Every memory file carries a scope, and you decide it as you write:
+
+```yaml
+metadata:
+  node_type: memory
+  type: user | feedback | project | reference
+  scope: universal | device
+  device: <hostname>        # only when scope is device
+  tags: [optional, freeform]
+```
+
+**scope answers one question: is this still true on another machine?**
+
+- `universal` — how Kirill wants to be worked with, facts about a codebase,
+  network topology, anything that travels. These are the ones synced to his
+  other devices, so writing one is writing for every machine he uses.
+- `device` — this box's hardware, desktop session, or installed services: the
+  laptop's soldered RAM, a Hyprland quirk, the media server's docker stack.
+  Name the machine in `device:`.
+
+Default to `universal` when genuinely torn. A wrongly-universal note shows up
+somewhere mildly irrelevant; a wrongly-device note is invisible on the machine
+that needed it, which is the more expensive mistake. But do not reach for it out
+of laziness — a note that says "on this machine" is device-scoped, and shipping
+it elsewhere makes it quietly false rather than merely useless.
+
+Browse and edit all of them at `http://localhost:8790/memory`, or on the
+dashboard at `https://dashboard.callmedaddy.dedyn.io/memory`, which shows every
+machine's notes. Universal ones sync between devices; device ones stay put.
 
 ## Shell environment
 
