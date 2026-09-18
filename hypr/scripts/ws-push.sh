@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-# CTRL+MOD+up/down window mover for the dwm-style scrolling layout.
+# CTRL+MOD+up/down window mover for the scrolling layout.
 #
 # Moves the focused window within its vertical column stack; once the window is
-# at the top/bottom of the column, pushes it to the adjacent workspace on the
-# same monitor instead (up = lower number, down = higher number). Stops at the
-# monitor's first/last workspace so a window never lands on the phantom ws 10
-# gap between the two monitors.
-#
-# Workspace scheme (see ws-dwm.sh): DP-3 = 1-9, HDMI-A-1 = 11-19.
+# at the top/bottom of the column, pushes it to the adjacent workspace instead
+# (up = lower number, down = higher number), clamped to 1-9.
 #
 # Usage: ws-push.sh <up|down>
 set -euo pipefail
@@ -46,14 +42,12 @@ if [ "${neighbors:-0}" -gt 0 ]; then
   exit 0
 fi
 
-# At the edge of the column -> push to the adjacent workspace on this monitor.
-base=0; { [ "$aws" -ge 11 ] && [ "$aws" -le 19 ]; } && base=10
-idx=$((aws - base))                 # 1..9 within the monitor's block
+# At the edge of the column -> push to the adjacent workspace.
 if [ "$dir" = up ]; then
-  [ "$idx" -le 1 ] && exit 0        # already on this monitor's first workspace
-  target=$((base + idx - 1))
+  [ "$aws" -le 1 ] && exit 0        # already on the first workspace
+  target=$((aws - 1))
 else
-  [ "$idx" -ge 9 ] && exit 0        # already on this monitor's last workspace
-  target=$((base + idx + 1))
+  [ "$aws" -ge 9 ] && exit 0        # already on the last workspace
+  target=$((aws + 1))
 fi
 hyprctl dispatch movetoworkspace "$target"
