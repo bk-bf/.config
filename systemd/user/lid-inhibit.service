@@ -1,0 +1,12 @@
+[Unit]
+Description=Hold logind's lid handling so the session decides when to suspend
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/systemd-inhibit --what=handle-lid-switch --who=hypr-idle-action --why="Lid suspend handled by idle-action.sh" --mode=block sleep infinity
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

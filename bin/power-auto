@@ -20,7 +20,6 @@ MIN_BALANCED_S=${POWER_AUTO_MIN_BALANCED_S:-60}
 SAVER_BATTERY_BELOW_PCT=${POWER_AUTO_SAVER_BATTERY_BELOW_PCT:-30}
 SAVER_BRIGHTNESS_BELOW_PCT=${POWER_AUTO_SAVER_BRIGHTNESS_BELOW_PCT:-50}
 LID_POLL_S=${POWER_AUTO_LID_POLL_S:-5}
-LID_SUSPEND_AFTER_S=${POWER_AUTO_LID_SUSPEND_AFTER_S:-60}
 REASSERT_AFTER_RESUME_S=${POWER_AUTO_REASSERT_AFTER_RESUME_S:-60}
 STATUS_EVERY_S=${POWER_AUTO_STATUS_EVERY_S:-600}
 RESUME_GAP_MS=5000
@@ -140,29 +139,6 @@ logind_prop() {
         | sed -E 's/^[a-z] "?([^"]*)"?$/\1/' || true
 }
 
-lid_action() {
-    local action=""
-    if [[ $DRY_RUN == 1 ]]; then
-        echo "${POWER_AUTO_LID_ACTION:-suspend}"
-        return
-    fi
-    if [[ $(logind_prop Docked) == true ]]; then
-        action=$(logind_prop HandleLidSwitchDocked)
-    elif [[ $ac == 1 ]]; then
-        action=$(logind_prop HandleLidSwitchExternalPower)
-    fi
-    [[ -n $action ]] || action=$(logind_prop HandleLidSwitch)
-    echo "$action"
-}
-
-suspend_now() {
-    if [[ $DRY_RUN == 1 ]]; then
-        log "would suspend"
-    else
-        systemctl suspend || log "systemctl suspend failed"
-    fi
-}
-
 sleep_report() {
     local slept_ms=$1 before=$2 hw_us irq name="" drain="" hw="unknown"
     hw_us=$(cat "$SUSPEND_STATS/last_hw_sleep" 2>/dev/null) || hw_us=""
@@ -207,10 +183,9 @@ reassert_at=$(( prev_t + REASSERT_AFTER_RESUME_S * 1000 ))
 resting=""
 lid_closed=0
 lid_checked_at=0
-lid_due=0
 
 read_power_source
-log "up at $(( UP_MW / 1000 )) W over ${UP_WINDOW_S} s, down under $(( DOWN_MW / 1000 )) W over ${DOWN_WINDOW_S} s, power-saver under ${SAVER_BATTERY_BELOW_PCT} % battery on battery or under ${SAVER_BRIGHTNESS_BELOW_PCT} % brightness, suspend if the lid stays closed ${LID_SUSPEND_AFTER_S} s while awake, profile $seen"
+log "up at $(( UP_MW / 1000 )) W over ${UP_WINDOW_S} s, down under $(( DOWN_MW / 1000 )) W over ${DOWN_WINDOW_S} s, power-saver under ${SAVER_BATTERY_BELOW_PCT} % battery on battery or under ${SAVER_BRIGHTNESS_BELOW_PCT} % brightness, profile $seen"
 assert_limits "$seen"
 
 while sleep 1; do
@@ -231,7 +206,6 @@ while sleep 1; do
         samples=()
         assert_limits "$profile"
         reassert_at=$(( t + REASSERT_AFTER_RESUME_S * 1000 ))
-        lid_due=$(( t + LID_SUSPEND_AFTER_S * 1000 ))
         continue
     fi
     samples+=("$(( d / dt ))")
@@ -259,15 +233,7 @@ while sleep 1; do
         if lid_is_closed; then
             if (( lid_closed == 0 )); then
                 lid_closed=1
-                lid_due=$(( t + LID_SUSPEND_AFTER_S * 1000 ))
-                log "lid closed, battery ${capacity} %, AC online $ac"
-            elif (( t >= lid_due )); then
-                lid_due=$(( t + LID_SUSPEND_AFTER_S * 1000 ))
-                action=$(lid_action)
-                if [[ $action == suspend ]]; then
-                    log "lid closed and still awake after ${LID_SUSPEND_AFTER_S} s, suspending"
-                    suspend_now
-                fi
+                log "lid closed, battery ${capacity} %, AC online $ac, switch $(lid_switch_state)"
             fi
         elif (( lid_closed == 1 )); then
             lid_closed=0
