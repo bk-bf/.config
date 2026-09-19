@@ -139,6 +139,49 @@ logind_prop() {
         | sed -E 's/^[a-z] "?([^"]*)"?$/\1/' || true
 }
 
+PMC=${POWER_AUTO_PMC:-/sys/kernel/debug/pmc_core}
+
+s0ix_usec() {
+    cat "$PMC/slp_s0_residency_usec" 2>/dev/null || echo ""
+}
+
+unmet_substates() {
+    awk -F'|' '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) { h = $i; gsub(/ /, "", h); if (h == "Status") col = i }
+            next
+        }
+        col == 0 { next }
+        {
+            elem = $1; sub(/^[^:]*: */, "", elem); gsub(/ /, "", elem)
+            required = 0
+            for (i = 2; i < col; i++) if ($i ~ /Required/) required = 1
+            status = $col; gsub(/ /, "", status)
+            if (required && status == "" && elem != "") out = out (out ? "," : "") elem
+        }
+        END { print out }' "$PMC/substate_requirements" 2>/dev/null | cut -c1-300
+}
+
+awake_devices() {
+    local d out=""
+    for d in /sys/bus/pci/devices/*/power/runtime_status /sys/bus/usb/devices/*/power/runtime_status /sys/bus/i2c/devices/*/power/runtime_status; do
+        [[ -r $d ]] || continue
+        [[ $(<"$d") == active ]] || continue
+        out="$out${out:+,}$(basename "$(dirname "$(dirname "$d")")")"
+    done
+    printf '%s' "${out:0:300}"
+}
+
+charge_mah() {
+    local v
+    v=$(cat "$BATTERY/charge_now" 2>/dev/null) || v=""
+    [[ $v =~ ^[0-9]+$ ]] && echo $(( v / 1000 )) || echo ""
+}
+
+voltage_uv() {
+    cat "$BATTERY/voltage_now" 2>/dev/null || echo ""
+}
+
 wake_counts() {
     local w name count
     for w in /sys/class/wakeup/wakeup*; do
@@ -158,7 +201,7 @@ wake_delta() {
 }
 
 sleep_report() {
-    local slept_ms=$1 before=$2 hw_us irq name="" drain="" hw="unknown"
+    local slept_ms=$1 before=$2 hw_us irq name="" drain="" hw="unknown" mah_now v s0ix_now s0ix_pct="unknown" drain_w="unknown" mah_drop
     hw_us=$(cat "$SUSPEND_STATS/last_hw_sleep" 2>/dev/null) || hw_us=""
     irq=$(cat "$WAKEUP_IRQ" 2>/dev/null) || irq=""
     [[ -n $irq ]] && name=$(awk -v i="$irq:" '$1 == i {print $NF}' /proc/interrupts)
@@ -167,7 +210,19 @@ sleep_report() {
         drain=$(( (before - capacity) * 36000000 / slept_ms ))
         drain=", $(( drain / 10 )).$(( drain % 10 )) %/h"
     fi
+    mah_now=$(charge_mah)
+    v=$(voltage_uv)
+    s0ix_now=$(s0ix_usec)
+    if [[ $s0ix_now =~ ^[0-9]+$ && $s0ix_before =~ ^[0-9]+$ ]]; then
+        s0ix_pct=$(( (s0ix_now - s0ix_before) / 10 / slept_ms ))
+    fi
+    if [[ $mah_now =~ ^[0-9]+$ && $mah_before =~ ^[0-9]+$ && $v =~ ^[0-9]+$ ]] && (( mah_before >= mah_now && slept_ms > 0 )); then
+        mah_drop=$(( mah_before - mah_now ))
+        drain_w=$(( mah_drop * (v / 1000) * 36 / slept_ms ))
+        drain_w="$(( drain_w / 100 )).$(( drain_w % 100 ))"
+    fi
     log "slept $(( slept_ms / 60000 )) min $(( slept_ms / 1000 % 60 )) s, battery ${before} % -> ${capacity} %${drain}, hardware sleep ${hw}, woken by IRQ ${irq:-unknown} ${name}"
+    log "sleep-report slept_s=$(( slept_ms / 1000 )) wake_irq=${irq:-unknown} wake_name=${name:-unknown} batt_before=${before} batt_after=${capacity} mah_before=${mah_before:-unknown} mah_after=${mah_now:-unknown} drain_w=${drain_w} hw_sleep_pct=${hw% *} s0ix_pct=${s0ix_pct} wake_sources=[$(wake_delta "$wake_before")] unmet_substates=[$(unmet_substates)] awake_devices=[${awake_before}]"
 }
 
 samples=()
@@ -203,6 +258,9 @@ lid_closed=0
 lid_checked_at=0
 wake_checked_at=0
 wake_before=$(wake_counts)
+mah_before=$(charge_mah)
+s0ix_before=$(s0ix_usec)
+awake_before=$(awake_devices)
 
 read_power_source
 log "up at $(( UP_MW / 1000 )) W over ${UP_WINDOW_S} s, down under $(( DOWN_MW / 1000 )) W over ${DOWN_WINDOW_S} s, power-saver under ${SAVER_BATTERY_BELOW_PCT} % battery on battery or under ${SAVER_BRIGHTNESS_BELOW_PCT} % brightness, profile $seen"
@@ -252,6 +310,9 @@ while sleep 1; do
     if (( t - wake_checked_at >= 10000 )); then
         wake_checked_at=$t
         wake_before=$(wake_counts)
+        mah_before=$(charge_mah)
+        s0ix_before=$(s0ix_usec)
+        awake_before=$(awake_devices)
     fi
     if (( t - lid_checked_at >= LID_POLL_S * 1000 )); then
         lid_checked_at=$t

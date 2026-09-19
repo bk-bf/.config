@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+import re
+import subprocess
+import sys
+
+FIELDS = [
+    ("slept_s", "how long it slept"),
+    ("wake_irq", "IRQ that woke it"),
+    ("wake_name", "device behind that IRQ"),
+    ("batt_before", "battery % before"),
+    ("batt_after", "battery % after"),
+    ("mah_before", "charge in mAh before"),
+    ("mah_after", "charge in mAh after"),
+    ("drain_w", "average watts while asleep"),
+    ("hw_sleep_pct", "share of the sleep in hardware sleep"),
+    ("s0ix_pct", "S0ix residency from the PMC"),
+    ("wake_sources", "wake sources that fired during the sleep"),
+    ("unmet_substates", "chip conditions that blocked the deepest state"),
+    ("awake_devices", "devices not runtime-suspended when it went down"),
+]
+
+def last_report(since):
+    out = subprocess.run(
+        ["journalctl", "-u", "power-auto", "--since", since, "--no-pager", "-o", "short-iso"],
+        capture_output=True, text=True).stdout
+    lines = [l for l in out.splitlines() if "sleep-report" in l]
+    return lines[-1] if lines else ""
+
+def parse(line):
+    body = line.split("sleep-report", 1)[1] if "sleep-report" in line else ""
+    found = {}
+    for key, _ in FIELDS:
+        m = re.search(r"\b%s=(\[[^\]]*\]|\S*)" % key, body)
+        if m:
+            found[key] = m.group(1)
+    return found
+
+def main():
+    since = sys.argv[1] if len(sys.argv) > 1 else "-14 days"
+    line = last_report(since)
+    if not line:
+        print("no sleep-report line found since %s" % since)
+        print("coverage 0/%d" % len(FIELDS))
+        return 1
+    when = line.split()[0]
+    found = parse(line)
+    missing = []
+    print("last sleep report: %s" % when)
+    for key, what in FIELDS:
+        value = found.get(key)
+        if value is None:
+            status, shown = "MISSING", "-"
+            missing.append(key)
+        elif value in ("unknown", "", "[]") and key not in ("wake_sources", "unmet_substates", "awake_devices"):
+            status, shown = "UNKNOWN", value
+            missing.append(key)
+        else:
+            status, shown = "ok", value if len(value) <= 60 else value[:57] + "..."
+        print("  %-8s %-17s %-42s %s" % (status, key, shown, what))
+    print("coverage %d/%d" % (len(FIELDS) - len(missing), len(FIELDS)))
+    return 1 if missing else 0
+
+sys.exit(main())
