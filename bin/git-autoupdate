@@ -42,8 +42,11 @@ for repo in "$ROOT"/*/; do
   [[ -e $repo/.git ]] || continue
   skipped "$(basename "$repo")" && continue
   if ! timeout 120 git -C "$repo" fetch --all --prune --quiet; then
-    failed+=("$(basename "$repo")")
-    continue
+    sleep 3
+    if ! timeout 120 git -C "$repo" fetch --all --prune --quiet; then
+      failed+=("$(basename "$repo")")
+      continue
+    fi
   fi
   while IFS=$'\t' read -r branch upstream track; do
     [[ $track =~ ^behind\ [0-9]+$ ]] && advance "$repo" "$branch" "$upstream"
