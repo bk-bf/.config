@@ -139,6 +139,24 @@ logind_prop() {
         | sed -E 's/^[a-z] "?([^"]*)"?$/\1/' || true
 }
 
+wake_counts() {
+    local w name count
+    for w in /sys/class/wakeup/wakeup*; do
+        [[ -r $w/name && -r $w/event_count ]] || continue
+        name=$(<"$w/name")
+        count=$(<"$w/event_count")
+        printf '%s %s\n' "$name" "$count"
+    done
+}
+
+wake_delta() {
+    { printf '%s\n' "$1"; echo '--'; wake_counts; } | awk '
+        $1 == "--" { second = 1; next }
+        !second { was[$1] = $2; next }
+        { d = $2 - was[$1]; if (d > 0) printf "%s +%d ", $1, d }
+        END { printf "\n" }'
+}
+
 sleep_report() {
     local slept_ms=$1 before=$2 hw_us irq name="" drain="" hw="unknown"
     hw_us=$(cat "$SUSPEND_STATS/last_hw_sleep" 2>/dev/null) || hw_us=""
@@ -183,6 +201,8 @@ reassert_at=$(( prev_t + REASSERT_AFTER_RESUME_S * 1000 ))
 resting=""
 lid_closed=0
 lid_checked_at=0
+wake_checked_at=0
+wake_before=$(wake_counts)
 
 read_power_source
 log "up at $(( UP_MW / 1000 )) W over ${UP_WINDOW_S} s, down under $(( DOWN_MW / 1000 )) W over ${DOWN_WINDOW_S} s, power-saver under ${SAVER_BATTERY_BELOW_PCT} % battery on battery or under ${SAVER_BRIGHTNESS_BELOW_PCT} % brightness, profile $seen"
@@ -202,6 +222,7 @@ while sleep 1; do
         before=$capacity
         read_power_source
         log "resumed after ${dt} ms in $profile"
+        log "wake sources during sleep: $(wake_delta "$wake_before")"
         sleep_report "$dt" "$before"
         samples=()
         assert_limits "$profile"
@@ -227,6 +248,10 @@ while sleep 1; do
             assert_limits "$rest"
         fi
         resting=$rest
+    fi
+    if (( t - wake_checked_at >= 10000 )); then
+        wake_checked_at=$t
+        wake_before=$(wake_counts)
     fi
     if (( t - lid_checked_at >= LID_POLL_S * 1000 )); then
         lid_checked_at=$t
