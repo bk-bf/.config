@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=T3 Code Nightly
+Exec=t3code-nightly
+TryExec=t3code-nightly
+Icon=t3code-nightly
+Terminal=false
+StartupNotify=false
+StartupWMClass=t3code
+X-GNOME-Autostart-enabled=true
