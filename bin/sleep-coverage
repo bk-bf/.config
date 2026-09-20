@@ -19,6 +19,12 @@ FIELDS = [
     ("awake_devices", "devices not runtime-suspended when it went down"),
 ]
 
+def charging(found):
+    try:
+        return int(found.get("mah_after", "0")) > int(found.get("mah_before", "0"))
+    except ValueError:
+        return False
+
 def last_report(since):
     out = subprocess.run(
         ["journalctl", "-u", "power-auto", "--since", since, "--no-pager", "-o", "short-iso"],
@@ -51,6 +57,8 @@ def main():
         if value is None:
             status, shown = "MISSING", "-"
             missing.append(key)
+        elif key == "drain_w" and value == "unknown" and charging(found):
+            status, shown = "ok", "n/a, charging"
         elif value in ("unknown", "", "[]") and key not in ("wake_sources", "unmet_substates", "awake_devices"):
             status, shown = "UNKNOWN", value
             missing.append(key)
