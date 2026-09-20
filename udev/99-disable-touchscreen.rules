@@ -1,3 +1,4 @@
 SUBSYSTEM=="input", ATTRS{name}=="GXTP7936:00 27C6:0123", ENV{LIBINPUT_IGNORE_DEVICE}="1"
 
 SUBSYSTEM=="i2c", KERNEL=="i2c-GXTP7936:00", ATTR{power/wakeup}="disabled"
+SUBSYSTEM=="acpi", KERNEL=="PNP0C0A:00", ATTR{power/wakeup}="disabled"

@@ -162,6 +162,18 @@ unmet_substates() {
         END { print out }' "$PMC/substate_requirements" 2>/dev/null | cut -c1-300
 }
 
+substate_residency() {
+    awk 'NR > 1 && $1 ~ /^S0i/ { printf "%s %s\n", $1, $2 }' "$PMC/substate_residencies" 2>/dev/null
+}
+
+substate_delta() {
+    { printf '%s\n' "$1"; echo '--'; substate_residency; } | awk -v ms="$2" '
+        $1 == "--" { second = 1; next }
+        !second { was[$1] = $2; next }
+        { d = ($2 - was[$1]) / 10 / ms; if (d > 0) printf "%s:%d%% ", $1, d }
+        END { printf "\n" }'
+}
+
 awake_devices() {
     local d out=""
     for d in /sys/bus/pci/devices/*/power/runtime_status /sys/bus/usb/devices/*/power/runtime_status /sys/bus/i2c/devices/*/power/runtime_status; do
@@ -218,11 +230,21 @@ sleep_report() {
     fi
     if [[ $mah_now =~ ^[0-9]+$ && $mah_before =~ ^[0-9]+$ && $v =~ ^[0-9]+$ ]] && (( mah_before >= mah_now && slept_ms > 0 )); then
         mah_drop=$(( mah_before - mah_now ))
-        drain_w=$(( mah_drop * (v / 1000) * 36 / slept_ms ))
+        drain_w=$(( mah_drop * (v / 1000) * 360 / slept_ms ))
         drain_w="$(( drain_w / 100 )).$(( drain_w % 100 ))"
     fi
     log "slept $(( slept_ms / 60000 )) min $(( slept_ms / 1000 % 60 )) s, battery ${before} % -> ${capacity} %${drain}, hardware sleep ${hw}, woken by IRQ ${irq:-unknown} ${name}"
-    log "sleep-report slept_s=$(( slept_ms / 1000 )) wake_irq=${irq:-unknown} wake_name=${name:-unknown} batt_before=${before} batt_after=${capacity} mah_before=${mah_before:-unknown} mah_after=${mah_now:-unknown} drain_w=${drain_w} hw_sleep_pct=${hw% *} s0ix_pct=${s0ix_pct} wake_sources=[$(wake_delta "$wake_before")] unmet_substates=[$(unmet_substates)] awake_devices=[${awake_before}]"
+    awake_s=0
+    awake_mah=""
+    if (( last_resume_t > 0 )); then
+        awake_s=$(( (t - last_resume_t) / 1000 - slept_ms / 1000 ))
+        if [[ $last_resume_mah =~ ^[0-9]+$ && $mah_before =~ ^[0-9]+$ ]]; then
+            awake_mah=$(( last_resume_mah - mah_before ))
+        fi
+    fi
+    log "sleep-report slept_s=$(( slept_ms / 1000 )) wake_irq=${irq:-unknown} wake_name=${name:-unknown} batt_before=${before} batt_after=${capacity} mah_before=${mah_before:-unknown} mah_after=${mah_now:-unknown} drain_w=${drain_w} hw_sleep_pct=${hw% *} s0ix_pct=${s0ix_pct} wake_sources=[$(wake_delta "$wake_before")] unmet_substates=[$(unmet_substates)] awake_devices=[${awake_before}] substates=[$(substate_delta "$substate_before" "$slept_ms")] awake_s_before=${awake_s} awake_mah_before=${awake_mah:-unknown}"
+    last_resume_t=$t
+    last_resume_mah=$(charge_mah)
 }
 
 samples=()
@@ -260,7 +282,10 @@ wake_checked_at=0
 wake_before=$(wake_counts)
 mah_before=$(charge_mah)
 s0ix_before=$(s0ix_usec)
+substate_before=$(substate_residency)
 awake_before=$(awake_devices)
+last_resume_t=0
+last_resume_mah=""
 
 read_power_source
 log "up at $(( UP_MW / 1000 )) W over ${UP_WINDOW_S} s, down under $(( DOWN_MW / 1000 )) W over ${DOWN_WINDOW_S} s, power-saver under ${SAVER_BATTERY_BELOW_PCT} % battery on battery or under ${SAVER_BRIGHTNESS_BELOW_PCT} % brightness, profile $seen"
@@ -312,6 +337,7 @@ while sleep 1; do
         wake_before=$(wake_counts)
         mah_before=$(charge_mah)
         s0ix_before=$(s0ix_usec)
+        substate_before=$(substate_residency)
         awake_before=$(awake_devices)
     fi
     if (( t - lid_checked_at >= LID_POLL_S * 1000 )); then
