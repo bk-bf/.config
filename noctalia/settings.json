@@ -233,9 +233,9 @@
                     "deviceNativePath": "__default__",
                     "displayMode": "icon-always",
                     "hideIfIdle": false,
-                    "hideIfNotDetected": true,
+                    "hideIfNotDetected": false,
                     "id": "Battery",
-                    "showNoctaliaPerformance": true,
+                    "showNoctaliaPerformance": false,
                     "showPowerProfiles": true
                 },
                 {
@@ -576,9 +576,9 @@
         "density": "compact",
         "enableBatteryToast": true,
         "enableKeyboardLayoutToast": true,
-        "enablePowerProfileToast": false,
         "enableMarkdown": false,
         "enableMediaToast": false,
+        "enablePowerProfileToast": false,
         "enabled": true,
         "location": "top_right",
         "lowUrgencyDuration": 1,
