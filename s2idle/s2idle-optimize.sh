@@ -49,7 +49,26 @@ if [ -d /sys/module/i915 ]; then
 fi
 
 echo ""
-echo "[5/5] Setting SATA link power management..."
+echo "[5/6] Ignoring LTR for blocks that keep the SoC out of its deepest substate..."
+LTR=/sys/kernel/debug/pmc_core/ltr_ignore
+LTR_SHOW=/sys/kernel/debug/pmc_core/ltr_show
+if [ -w "$LTR" ] && [ -r "$LTR_SHOW" ]; then
+    idx=0
+    while read -r line; do
+        name=${line%%[[:space:]]*}
+        case "$name" in
+            SOUTHPORT_B|GBE|ME|IOE_PMC|SOUTHPORT_D|PMC1:SOUTHPORT_D)
+                echo "$idx" > "$LTR" 2>/dev/null && echo "  ignored LTR $idx ($name)"
+                ;;
+        esac
+        idx=$((idx + 1))
+    done < "$LTR_SHOW"
+else
+    echo "  pmc_core ltr_ignore not available"
+fi
+
+echo ""
+echo "[6/6] Setting SATA link power management..."
 for dev in /sys/class/scsi_host/host*/link_power_management_policy; do
     echo "med_power_with_dipm" > "$dev" 2>/dev/null || true
 done
