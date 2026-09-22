@@ -1,0 +1,7 @@
+[Unit]
+Description=Restore CDDA/TLG library names after Catapult installs a build
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/sleep 3
+ExecStart=%h/.config/bin/catapult-fix-libs

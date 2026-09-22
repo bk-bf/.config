@@ -1,0 +1,9 @@
+[Unit]
+Description=Restore CDDA/TLG library names after Catapult installs a build
+
+[Path]
+PathChanged=/opt/catapult-bin/dda/game0/lib
+PathChanged=/opt/catapult-bin/tlg/game0/lib
+
+[Install]
+WantedBy=default.target
