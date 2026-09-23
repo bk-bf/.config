@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+# Drop the Overhaul mod's ring sprite for cursor/highlight/line_target/line_trail
+# from the BN install, so the tileset's own bracket cursor is drawn instead.
+# Catapult restores the file on every BN update; this reapplies the edit.
+# Writes only when the entry is present, so a run triggered by its own write
+# changes nothing.
+
+import json
+import os
+import sys
+
+root = os.environ.get("CATAPULT_ROOT", "/opt/catapult-bin")
+path = f"{root}/bn/game0/data/mods/overhaul/overhaul_interface_tiles.json"
+ids = ["cursor", "highlight", "line_target", "line_trail"]
+
+try:
+    with open(path) as f:
+        data = json.load(f)
+except FileNotFoundError:
+    print(f"absent {path}")
+    sys.exit(0)
+
+removed = 0
+for entry in data:
+    for sheet in entry.get("tiles-new", []):
+        kept = [t for t in sheet["tiles"] if t.get("id") != ids]
+        removed += len(sheet["tiles"]) - len(kept)
+        sheet["tiles"] = kept
+
+if removed:
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+
+print(f"removed {removed}")

@@ -1,5 +1,5 @@
 [Unit]
-Description=Watch Catapult CDDA/BN installs for re-extraction and repair lib symlinks
+Description=Watch Catapult CDDA/BN installs for re-extraction; repair lib symlinks and the BN cursor patch
 
 [Path]
 # Fires whenever Catapult writes into the game's lib dir (e.g. on update),
@@ -8,6 +8,7 @@ PathModified=/opt/catapult-bin/dda/game0/lib
 PathChanged=/opt/catapult-bin/dda/game0/lib
 PathModified=/opt/catapult-bin/bn/game0/lib
 PathChanged=/opt/catapult-bin/bn/game0/lib
+PathChanged=/opt/catapult-bin/bn/game0/data/mods/overhaul/overhaul_interface_tiles.json
 
 [Install]
 WantedBy=default.target
