@@ -1,5 +1,5 @@
 [Unit]
-Description=Restore CDDA/TLG library names after Catapult installs a build
+Description=Restore CDDA/TLG/BN library names after Catapult installs a build
 
 [Service]
 Type=oneshot
