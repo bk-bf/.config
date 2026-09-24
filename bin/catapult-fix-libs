@@ -1,7 +1,14 @@
 #!/bin/sh
-# Recreate the SONAME symlinks Catapult's extractor drops from CDDA/TLG
-# release tarballs. Without them the game dies at ld.so and the launcher
-# just sits there.
+# Recreate the SONAME links Catapult's extractor drops from game release
+# tarballs. Without them the game dies at ld.so and the launcher just sits
+# there.
+#
+# The links are hard links, not symlinks. Catapult's recursive delete
+# (filesystem_helper.gd, _rm_dir_internal) removes the real library first;
+# a symlink to it is then dangling, is skipped as neither file nor dir, and
+# the next update fails with "Failed to remove directory .../lib". A hard
+# link is an ordinary file that Catapult deletes like any other. Existing
+# symlinks are converted.
 
 root=${CATAPULT_ROOT:-/opt/catapult-bin}
 linked=0
@@ -10,10 +17,17 @@ for lib in "$root"/*/game*/lib; do
 	[ -d "$lib" ] || continue
 
 	for path in "$lib"/*.so.*; do
+		[ -L "$path" ] || continue
+		target=$(readlink -f "$path")
+		rm -f "$path" || exit 1
+		[ -f "$target" ] || continue
+		ln -f "$target" "$path" || exit 1
+		printf '%s -> %s (was symlink)\n' "$path" "${target##*/}"
+		linked=$((linked + 1))
+	done
+
+	for path in "$lib"/*.so.*; do
 		[ -f "$path" ] || continue
-		if [ -L "$path" ]; then
-			continue
-		fi
 
 		file=${path##*/}
 		soname=$(objdump -p "$path" 2>/dev/null | awk '/SONAME/{print $2; exit}')
@@ -22,7 +36,7 @@ for lib in "$root"/*/game*/lib; do
 		[ "$soname" != "$file" ] || continue
 		[ -e "$lib/$soname" ] && continue
 
-		ln -sfn "$file" "$lib/$soname" || exit 1
+		ln -f "$path" "$lib/$soname" || exit 1
 		printf '%s/%s -> %s\n' "$lib" "$soname" "$file"
 		linked=$((linked + 1))
 	done

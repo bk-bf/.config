@@ -1,0 +1,7 @@
+#!/bin/sh
+# Start Catapult with the game installs repaired first: SONAME hard links
+# (catapult-fix-libs) and the BN cursor patch (catapult-bn-cursor). The
+# catapult-fix-libs.path watcher covers updates made while Catapult runs.
+"$HOME/.config/bin/catapult-fix-libs" >/dev/null 2>&1
+"$HOME/.config/bin/catapult-bn-cursor" >/dev/null 2>&1
+exec /usr/bin/catapult "$@"
